@@ -108,5 +108,11 @@ struct CollectionOptions {
 
     // The collection's default collation.
     BSONObj collation;
+
+    // View-related options.
+    // The namespace of the view or collection that "backs" this view.
+    std::string viewNamespace;
+    // The aggregation pipeline that defines this view.
+    BSONObj pipeline;
 };
 }

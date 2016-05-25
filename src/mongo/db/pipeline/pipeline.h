@@ -56,6 +56,8 @@ class Pipeline : public IntrusiveCounterUnsigned {
 public:
     typedef std::list<boost::intrusive_ptr<DocumentSource>> SourceContainer;
 
+    Pipeline(const SourceContainer docSources, const boost::intrusive_ptr<ExpressionContext>& ctx);
+
     /**
      * Create a pipeline from the command.
      *
@@ -166,6 +168,13 @@ public:
     DocumentSource* output() {
         invariant(!sources.empty());
         return sources.back().get();
+    }
+
+    /**
+     * Returns the list of document sources that comprise this pipeline.
+     */
+    SourceContainer& getSources() {
+        return sources;
     }
 
     /**

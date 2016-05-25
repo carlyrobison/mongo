@@ -40,16 +40,14 @@
 #include "mongo/db/audit.h"
 #include "mongo/db/auth/auth_index_d.h"
 #include "mongo/db/background.h"
-#include "mongo/db/clientcursor.h"
 #include "mongo/db/catalog/collection.h"
 #include "mongo/db/catalog/collection_catalog_entry.h"
 #include "mongo/db/catalog/collection_options.h"
 #include "mongo/db/catalog/database_catalog_entry.h"
 #include "mongo/db/catalog/database_holder.h"
+#include "mongo/db/clientcursor.h"
 #include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/dbhelpers.h"
-#include "mongo/db/service_context.h"
-#include "mongo/db/service_context_d.h"
 #include "mongo/db/index/index_access_method.h"
 #include "mongo/db/instance.h"
 #include "mongo/db/introspect.h"
@@ -57,10 +55,13 @@
 #include "mongo/db/repl/oplog.h"
 #include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/server_parameters.h"
+#include "mongo/db/service_context.h"
+#include "mongo/db/service_context_d.h"
 #include "mongo/db/stats/top.h"
-#include "mongo/db/storage/storage_options.h"
-#include "mongo/db/storage/storage_engine.h"
 #include "mongo/db/storage/recovery_unit.h"
+#include "mongo/db/storage/storage_engine.h"
+#include "mongo/db/storage/storage_options.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -613,6 +614,11 @@ Status userCreateNS(OperationContext* txn,
     if (collection)
         return Status(ErrorCodes::NamespaceExists, "collection already exists");
 
+    ViewDefinition* view = ViewCatalog::getInstance()->lookup(txn, ns);
+
+    if (view)
+        return Status(ErrorCodes::NamespaceExists, "view already exists");
+
     CollectionOptions collectionOptions;
     Status status = collectionOptions.parse(options);
     if (!status.isOK())
@@ -637,7 +643,28 @@ Status userCreateNS(OperationContext* txn,
         }
     }
 
-    invariant(db->createCollection(txn, ns, collectionOptions, createDefaultIndexes));
+    // If "view" is specified, create a new view. Otherwise, default to creating a collection.
+    std::string viewNs = collectionOptions.viewNamespace;
+    if (!viewNs.empty()) {
+        if (collectionOptions.pipeline.isEmpty())
+            return Status(ErrorCodes::BadValue,
+                          "must define an aggregation pipeline to create a view");
+
+        // ns is fully-qualified already, but viewNs is not. Append the database name.
+        StringData fullViewNs(db->name() + "." + viewNs);
+
+        LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
+               << fullViewNs << " with pipeline " << collectionOptions.pipeline;
+        return ViewCatalog::getInstance()->createView(
+            txn, ns, fullViewNs, collectionOptions.pipeline);
+    } else {
+        if (!collectionOptions.pipeline.isEmpty())
+            return Status(ErrorCodes::BadValue,
+                          "'pipeline' option can only be used when creating a view");
+
+        LOG(3) << "VIEWS: userCreateNS detecting an ordinary create collection command";
+        invariant(db->createCollection(txn, ns, collectionOptions, createDefaultIndexes));
+    }
 
     return Status::OK();
 }

@@ -65,6 +65,10 @@ const char Pipeline::fromRouterName[] = "fromRouter";
 const char Pipeline::serverPipelineName[] = "serverPipeline";
 const char Pipeline::mongosPipelineName[] = "mongosPipeline";
 
+Pipeline::Pipeline(const SourceContainer docSources,
+                   const boost::intrusive_ptr<ExpressionContext>& ctx)
+    : sources(docSources), explain(false), pCtx(ctx) {}
+
 Pipeline::Pipeline(const intrusive_ptr<ExpressionContext>& pTheCtx)
     : explain(false), pCtx(pTheCtx) {}
 

@@ -24,6 +24,7 @@ env.SConscript(
         'sorter',
         'stats',
         'storage',
+        'views',
     ],
 )
 

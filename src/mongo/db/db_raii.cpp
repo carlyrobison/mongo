@@ -117,6 +117,7 @@ AutoGetCollectionForRead::~AutoGetCollectionForRead() {
 }
 
 void AutoGetCollectionForRead::_ensureMajorityCommittedSnapshotIsValid(const NamespaceString& nss) {
+    // TODO: Might need to expose this functionality higher up. Look at this later.
     while (true) {
         auto coll = _autoColl->getCollection();
         if (!coll) {

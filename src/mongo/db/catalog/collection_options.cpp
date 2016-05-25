@@ -106,6 +106,8 @@ void CollectionOptions::reset() {
     validationLevel = "";
     validationAction = "";
     collation = BSONObj();
+    viewNamespace = "";
+    pipeline = BSONObj();  // TODO: Empty document or empty array?
 }
 
 bool CollectionOptions::isValid() const {
@@ -216,6 +218,18 @@ Status CollectionOptions::parse(const BSONObj& options) {
             }
 
             collation = e.Obj().getOwned();
+        } else if (fieldName == "view") {
+            if (e.type() != mongo::String) {
+                return Status(ErrorCodes::BadValue, "'view' has to be a string.");
+            }
+
+            viewNamespace = e.String();
+        } else if (fieldName == "pipeline") {
+            if (e.type() != mongo::Array) {
+                return Status(ErrorCodes::BadValue, "'pipeline' has to be an array.");
+            }
+
+            pipeline = e.Obj().getOwned();
         }
     }
 
@@ -268,6 +282,14 @@ BSONObj CollectionOptions::toBSON() const {
 
     if (!collation.isEmpty()) {
         b.append("collation", collation);
+    }
+
+    if (!viewNamespace.empty()) {
+        b.append("view", viewNamespace);
+    }
+
+    if (!pipeline.isEmpty()) {
+        b.append("pipeline", pipeline);
     }
 
     return b.obj();

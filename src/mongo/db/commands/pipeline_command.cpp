@@ -40,7 +40,6 @@
 #include "mongo/db/db_raii.h"
 #include "mongo/db/exec/pipeline_proxy.h"
 #include "mongo/db/exec/working_set_common.h"
-#include "mongo/db/service_context.h"
 #include "mongo/db/pipeline/accumulator.h"
 #include "mongo/db/pipeline/document.h"
 #include "mongo/db/pipeline/document_source.h"
@@ -52,7 +51,10 @@
 #include "mongo/db/query/find_common.h"
 #include "mongo/db/query/get_executor.h"
 #include "mongo/db/query/plan_summary_stats.h"
+#include "mongo/db/service_context.h"
 #include "mongo/db/storage/storage_options.h"
+#include "mongo/db/views/view.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/stdx/memory.h"
 
 namespace mongo {
@@ -218,14 +220,21 @@ public:
         unique_ptr<ClientCursorPin> pin;  // either this OR the exec will be non-null
         unique_ptr<PlanExecutor> exec;
         {
+            // If the collection can't be found, attempt to resolve the namespace as a view.
+            auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, nss.ns(), pPipeline);
+
+            // This is our final pipeline: a modified one for a view, or the original if it's not a
+            // view.
+            pPipeline = std::get<1>(newAggregation);
+
+            // Acquire locks.
             // This will throw if the sharding version for this connection is out of date. The
             // lock must be held continuously from now until we have we created both the output
             // ClientCursor and the input executor. This ensures that both are using the same
             // sharding version that we synchronize on here. This is also why we always need to
             // create a ClientCursor even when we aren't outputting to a cursor. See the comment
             // on ShardFilterStage for more details.
-            AutoGetCollectionForRead ctx(txn, nss.ns());
-
+            AutoGetCollectionForRead ctx(txn, std::get<0>(newAggregation));
             Collection* collection = ctx.getCollection();
 
             // This does mongod-specific stuff like creating the input PlanExecutor and adding
