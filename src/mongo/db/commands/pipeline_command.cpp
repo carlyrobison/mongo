@@ -26,6 +26,8 @@
  * it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kQuery
+
 #include "mongo/platform/basic.h"
 
 #include <vector>
@@ -56,6 +58,7 @@
 #include "mongo/db/views/view.h"
 #include "mongo/db/views/view_catalog.h"
 #include "mongo/stdx/memory.h"
+#include "mongo/util/log.h"
 
 namespace mongo {
 
@@ -204,6 +207,8 @@ public:
         intrusive_ptr<Pipeline> pPipeline = Pipeline::parseCommand(errmsg, cmdObj, pCtx);
         if (!pPipeline.get())
             return false;
+
+        log() << cmdObj.jsonString();
 
         // This is outside of the if block to keep the object alive until the pipeline is finished.
         BSONObj parsed;

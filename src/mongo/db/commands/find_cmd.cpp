@@ -60,6 +60,50 @@ namespace {
 
 const char kTermField[] = "term";
 
+BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
+    BSONObjIterator it(cmd);
+    BSONObjBuilder b;
+    
+    std::vector<BSONObj> pipeline;
+    
+    // Build the pipeline
+    if (cmd.hasField("filter")) {
+        BSONObjBuilder match;
+        match.append("$match", cmd.getObjectField("filter"));
+        pipeline.push_back(match.obj());
+    }
+    if (cmd.hasField("limit")) {
+        BSONObjBuilder limit;
+        limit.append("$limit", cmd["limit"].numberInt());
+        pipeline.push_back(limit.obj());
+    }
+    if (cmd.hasField("sort")) {
+        BSONObjBuilder sort;
+        sort.append("$sort", cmd.getObjectField("sort"));
+        pipeline.push_back(sort.obj());
+    }
+    if (cmd.hasField("projection")) {
+        BSONObjBuilder project;
+        project.append("$project", cmd.getObjectField("projection"));
+        pipeline.push_back(project.obj());
+    }
+
+    b.append("aggregate", cmd["find"].str());
+    b.append("pipeline", pipeline);
+
+    if (cmd.hasField("batchSize")) {
+        BSONObjBuilder batchSize;
+        batchSize.append("batchSize", cmd["batchSize"].numberInt());
+        b.append("cursor", batchSize.obj());
+    }
+
+    if (hasExplain) {
+        b.append("explain", true);
+    }
+   
+    return b.obj();
+}
+
 }  // namespace
 
 /**
@@ -136,38 +180,46 @@ public:
                     str::stream() << "Invalid collection name: " << nss.ns()};
         }
 
-        // Parse the command BSON to a LiteParsedQuery.
-        const bool isExplain = true;
-        auto lpqStatus = LiteParsedQuery::makeFromFindCommand(nss, cmdObj, isExplain);
-        if (!lpqStatus.isOK()) {
-            return lpqStatus.getStatus();
+        BSONObj explainCmd = convertToAggregate(cmdObj, true);
+        Command *c = Command::findCommand("aggregate");
+        std::string errMsg;
+        bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
+        if (retVal) {
+            return Status::OK();
         }
 
-        // Finish the parsing step by using the LiteParsedQuery to create a CanonicalQuery.
+        // // Parse the command BSON to a LiteParsedQuery.
+        // const bool isExplain = true;
+        // auto lpqStatus = LiteParsedQuery::makeFromFindCommand(nss, cmdObj, isExplain);
+        // if (!lpqStatus.isOK()) {
+        //     return lpqStatus.getStatus();
+        // }
 
-        ExtensionsCallbackReal extensionsCallback(txn, &nss);
-        auto statusWithCQ =
-            CanonicalQuery::canonicalize(txn, std::move(lpqStatus.getValue()), extensionsCallback);
-        if (!statusWithCQ.isOK()) {
-            return statusWithCQ.getStatus();
-        }
-        std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
+        // // Finish the parsing step by using the LiteParsedQuery to create a CanonicalQuery.
 
-        AutoGetCollectionForRead ctx(txn, nss);
-        // The collection may be NULL. If so, getExecutor() should handle it by returning
-        // an execution tree with an EOFStage.
-        Collection* collection = ctx.getCollection();
+        // ExtensionsCallbackReal extensionsCallback(txn, &nss);
+        // auto statusWithCQ =
+        //     CanonicalQuery::canonicalize(txn, std::move(lpqStatus.getValue()), extensionsCallback);
+        // if (!statusWithCQ.isOK()) {
+        //     return statusWithCQ.getStatus();
+        // }
+        // std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
 
-        // We have a parsed query. Time to get the execution plan for it.
-        auto statusWithPlanExecutor =
-            getExecutorFind(txn, collection, nss, std::move(cq), PlanExecutor::YIELD_AUTO);
-        if (!statusWithPlanExecutor.isOK()) {
-            return statusWithPlanExecutor.getStatus();
-        }
-        std::unique_ptr<PlanExecutor> exec = std::move(statusWithPlanExecutor.getValue());
+        // AutoGetCollectionForRead ctx(txn, nss);
+        // // The collection may be NULL. If so, getExecutor() should handle it by returning
+        // // an execution tree with an EOFStage.
+        // Collection* collection = ctx.getCollection();
 
-        // Got the execution tree. Explain it.
-        Explain::explainStages(exec.get(), verbosity, out);
+        // // We have a parsed query. Time to get the execution plan for it.
+        // auto statusWithPlanExecutor =
+        //     getExecutorFind(txn, collection, nss, std::move(cq), PlanExecutor::YIELD_AUTO);
+        // if (!statusWithPlanExecutor.isOK()) {
+        //     return statusWithPlanExecutor.getStatus();
+        // }
+        // std::unique_ptr<PlanExecutor> exec = std::move(statusWithPlanExecutor.getValue());
+
+        // // Got the execution tree. Explain it.
+        // Explain::explainStages(exec.get(), verbosity, out);
         return Status::OK();
     }
 
@@ -195,154 +247,163 @@ public:
 
         // Although it is a command, a find command gets counted as a query.
         globalOpCounters.gotQuery();
+        BSONObj match = convertToAggregate(cmdObj, false);
+        log() << cmdObj.jsonString();
+        // log() << match.jsonString();
 
-        if (txn->getClient()->isInDirectClient()) {
-            return appendCommandStatus(
-                result,
-                Status(ErrorCodes::IllegalOperation, "Cannot run find command from eval()"));
-        }
+        Command *c = Command::findCommand("aggregate");
+        bool retval = c->run(txn, dbname, match, options, errmsg, result);
+        return retval;
 
-        // Parse the command BSON to a LiteParsedQuery.
-        const bool isExplain = false;
-        auto lpqStatus = LiteParsedQuery::makeFromFindCommand(nss, cmdObj, isExplain);
-        if (!lpqStatus.isOK()) {
-            return appendCommandStatus(result, lpqStatus.getStatus());
-        }
+        // if (txn->getClient()->isInDirectClient()) {
+        //     return appendCommandStatus(
+        //         result,
+        //         Status(ErrorCodes::IllegalOperation, "Cannot run find command from eval()"));
+        // }
 
-        auto& lpq = lpqStatus.getValue();
+        // // Parse the command BSON to a LiteParsedQuery.
+        // const bool isExplain = false;
+        // auto lpqStatus = LiteParsedQuery::makeFromFindCommand(nss, cmdObj, isExplain);
+        // if (!lpqStatus.isOK()) {
+        //     return appendCommandStatus(result, lpqStatus.getStatus());
+        // }
 
-        // Validate term before acquiring locks, if provided.
-        if (auto term = lpq->getReplicationTerm()) {
-            auto replCoord = repl::ReplicationCoordinator::get(txn);
-            Status status = replCoord->updateTerm(txn, *term);
-            // Note: updateTerm returns ok if term stayed the same.
-            if (!status.isOK()) {
-                return appendCommandStatus(result, status);
-            }
-        }
+        // log() << cmdObj.jsonString();
 
-        // Fill out curop information.
-        //
-        // We pass negative values for 'ntoreturn' and 'ntoskip' to indicate that these values
-        // should be omitted from the log line. Limit and skip information is already present in the
-        // find command parameters, so these fields are redundant.
-        const int ntoreturn = -1;
-        const int ntoskip = -1;
-        beginQueryOp(txn, nss, cmdObj, ntoreturn, ntoskip);
+        // auto& lpq = lpqStatus.getValue();
 
-        // Finish the parsing step by using the LiteParsedQuery to create a CanonicalQuery.
-        ExtensionsCallbackReal extensionsCallback(txn, &nss);
-        auto statusWithCQ = CanonicalQuery::canonicalize(txn, std::move(lpq), extensionsCallback);
-        if (!statusWithCQ.isOK()) {
-            return appendCommandStatus(result, statusWithCQ.getStatus());
-        }
-        std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
+        // // Validate term before acquiring locks, if provided.
+        // if (auto term = lpq->getReplicationTerm()) {
+        //     auto replCoord = repl::ReplicationCoordinator::get(txn);
+        //     Status status = replCoord->updateTerm(txn, *term);
+        //     // Note: updateTerm returns ok if term stayed the same.
+        //     if (!status.isOK()) {
+        //         return appendCommandStatus(result, status);
+        //     }
+        // }
 
-        // Acquire locks.
-        AutoGetCollectionForRead ctx(txn, nss);
-        Collection* collection = ctx.getCollection();
+        // // Fill out curop information.
+        // //
+        // // We pass negative values for 'ntoreturn' and 'ntoskip' to indicate that these values
+        // // should be omitted from the log line. Limit and skip information is already present in the
+        // // find command parameters, so these fields are redundant.
+        // const int ntoreturn = -1;
+        // const int ntoskip = -1;
+        // beginQueryOp(txn, nss, cmdObj, ntoreturn, ntoskip);
 
-        // Get the execution plan for the query.
-        auto statusWithPlanExecutor =
-            getExecutorFind(txn, collection, nss, std::move(cq), PlanExecutor::YIELD_AUTO);
-        if (!statusWithPlanExecutor.isOK()) {
-            return appendCommandStatus(result, statusWithPlanExecutor.getStatus());
-        }
+        // // Finish the parsing step by using the LiteParsedQuery to create a CanonicalQuery.
+        // ExtensionsCallbackReal extensionsCallback(txn, &nss);
+        // auto statusWithCQ = CanonicalQuery::canonicalize(txn, std::move(lpq), extensionsCallback);
+        // if (!statusWithCQ.isOK()) {
+        //     return appendCommandStatus(result, statusWithCQ.getStatus());
+        // }
+        // std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
 
-        std::unique_ptr<PlanExecutor> exec = std::move(statusWithPlanExecutor.getValue());
+        // // Acquire locks.
+        // AutoGetCollectionForRead ctx(txn, nss);
+        // Collection* collection = ctx.getCollection();
 
-        {
-            stdx::lock_guard<Client>(*txn->getClient());
-            CurOp::get(txn)->setPlanSummary_inlock(Explain::getPlanSummary(exec.get()));
-        }
+        // // Get the execution plan for the query.
+        // auto statusWithPlanExecutor =
+        //     getExecutorFind(txn, collection, nss, std::move(cq), PlanExecutor::YIELD_AUTO);
+        // if (!statusWithPlanExecutor.isOK()) {
+        //     return appendCommandStatus(result, statusWithPlanExecutor.getStatus());
+        // }
 
-        if (!collection) {
-            // No collection. Just fill out curop indicating that there were zero results and
-            // there is no ClientCursor id, and then return.
-            const long long numResults = 0;
-            const CursorId cursorId = 0;
-            endQueryOp(txn, collection, *exec, numResults, cursorId);
-            appendCursorResponseObject(cursorId, nss.ns(), BSONArray(), &result);
-            return true;
-        }
+        // std::unique_ptr<PlanExecutor> exec = std::move(statusWithPlanExecutor.getValue());
 
-        const LiteParsedQuery& pq = exec->getCanonicalQuery()->getParsed();
+        // {
+        //     stdx::lock_guard<Client>(*txn->getClient());
+        //     CurOp::get(txn)->setPlanSummary_inlock(Explain::getPlanSummary(exec.get()));
+        // }
 
-        // Stream query results, adding them to a BSONArray as we go.
-        CursorResponseBuilder firstBatch(/*isInitialResponse*/ true, &result);
-        BSONObj obj;
-        PlanExecutor::ExecState state = PlanExecutor::ADVANCED;
-        long long numResults = 0;
-        while (!FindCommon::enoughForFirstBatch(pq, numResults) &&
-               PlanExecutor::ADVANCED == (state = exec->getNext(&obj, NULL))) {
-            // If we can't fit this result inside the current batch, then we stash it for later.
-            if (!FindCommon::haveSpaceForNext(obj, numResults, firstBatch.bytesUsed())) {
-                exec->enqueue(obj);
-                break;
-            }
+        // if (!collection) {
+        //     // No collection. Just fill out curop indicating that there were zero results and
+        //     // there is no ClientCursor id, and then return.
+        //     const long long numResults = 0;
+        //     const CursorId cursorId = 0;
+        //     endQueryOp(txn, collection, *exec, numResults, cursorId);
+        //     appendCursorResponseObject(cursorId, nss.ns(), BSONArray(), &result);
+        //     return true;
+        // }
 
-            // Add result to output buffer.
-            firstBatch.append(obj);
-            numResults++;
-        }
+        // const LiteParsedQuery& pq = exec->getCanonicalQuery()->getParsed();
 
-        // Throw an assertion if query execution fails for any reason.
-        if (PlanExecutor::FAILURE == state || PlanExecutor::DEAD == state) {
-            firstBatch.abandon();
-            error() << "Plan executor error during find command: " << PlanExecutor::statestr(state)
-                    << ", stats: " << Explain::getWinningPlanStats(exec.get());
+        // // Stream query results, adding them to a BSONArray as we go.
+        // CursorResponseBuilder firstBatch(/*isInitialResponse*/ true, &result);
+        // BSONObj obj;
+        // PlanExecutor::ExecState state = PlanExecutor::ADVANCED;
+        // long long numResults = 0;
+        // while (!FindCommon::enoughForFirstBatch(pq, numResults) &&
+        //        PlanExecutor::ADVANCED == (state = exec->getNext(&obj, NULL))) {
+        //     // If we can't fit this result inside the current batch, then we stash it for later.
+        //     if (!FindCommon::haveSpaceForNext(obj, numResults, firstBatch.bytesUsed())) {
+        //         exec->enqueue(obj);
+        //         break;
+        //     }
 
-            return appendCommandStatus(result,
-                                       Status(ErrorCodes::OperationFailed,
-                                              str::stream()
-                                                  << "Executor error during find command: "
-                                                  << WorkingSetCommon::toStatusString(obj)));
-        }
+        //     // Add result to output buffer.
+        //     firstBatch.append(obj);
+        //     numResults++;
+        // }
 
-        // Before saving the cursor, ensure that whatever plan we established happened with the
-        // expected collection version
-        auto css = CollectionShardingState::get(txn, nss);
-        css->checkShardVersionOrThrow(txn);
+        // // Throw an assertion if query execution fails for any reason.
+        // if (PlanExecutor::FAILURE == state || PlanExecutor::DEAD == state) {
+        //     firstBatch.abandon();
+        //     error() << "Plan executor error during find command: " << PlanExecutor::statestr(state)
+        //             << ", stats: " << Explain::getWinningPlanStats(exec.get());
 
-        // Set up the cursor for getMore.
-        CursorId cursorId = 0;
-        if (shouldSaveCursor(txn, collection, state, exec.get())) {
-            // Register the execution plan inside a ClientCursor. Ownership of the PlanExecutor is
-            // transferred to the ClientCursor.
-            //
-            // First unregister the PlanExecutor so it can be re-registered with ClientCursor.
-            exec->deregisterExec();
+        //     return appendCommandStatus(result,
+        //                                Status(ErrorCodes::OperationFailed,
+        //                                       str::stream()
+        //                                           << "Executor error during find command: "
+        //                                           << WorkingSetCommon::toStatusString(obj)));
+        // }
 
-            // Create a ClientCursor containing this plan executor. We don't have to worry about
-            // leaking it as it's inserted into a global map by its ctor.
-            ClientCursor* cursor =
-                new ClientCursor(collection->getCursorManager(),
-                                 exec.release(),
-                                 nss.ns(),
-                                 txn->recoveryUnit()->isReadingFromMajorityCommittedSnapshot(),
-                                 pq.getOptions(),
-                                 pq.getFilter());
-            cursorId = cursor->cursorid();
+        // // Before saving the cursor, ensure that whatever plan we established happened with the
+        // // expected collection version
+        // auto css = CollectionShardingState::get(txn, nss);
+        // css->checkShardVersionOrThrow(txn);
 
-            invariant(!exec);
-            PlanExecutor* cursorExec = cursor->getExecutor();
+        // // Set up the cursor for getMore.
+        // CursorId cursorId = 0;
+        // if (shouldSaveCursor(txn, collection, state, exec.get())) {
+        //     // Register the execution plan inside a ClientCursor. Ownership of the PlanExecutor is
+        //     // transferred to the ClientCursor.
+        //     //
+        //     // First unregister the PlanExecutor so it can be re-registered with ClientCursor.
+        //     exec->deregisterExec();
 
-            // State will be restored on getMore.
-            cursorExec->saveState();
-            cursorExec->detachFromOperationContext();
+        //     // Create a ClientCursor containing this plan executor. We don't have to worry about
+        //     // leaking it as it's inserted into a global map by its ctor.
+        //     ClientCursor* cursor =
+        //         new ClientCursor(collection->getCursorManager(),
+        //                          exec.release(),
+        //                          nss.ns(),
+        //                          txn->recoveryUnit()->isReadingFromMajorityCommittedSnapshot(),
+        //                          pq.getOptions(),
+        //                          pq.getFilter());
+        //     cursorId = cursor->cursorid();
 
-            cursor->setLeftoverMaxTimeMicros(txn->getRemainingMaxTimeMicros());
-            cursor->setPos(numResults);
+        //     invariant(!exec);
+        //     PlanExecutor* cursorExec = cursor->getExecutor();
 
-            // Fill out curop based on the results.
-            endQueryOp(txn, collection, *cursorExec, numResults, cursorId);
-        } else {
-            endQueryOp(txn, collection, *exec, numResults, cursorId);
-        }
+        //     // State will be restored on getMore.
+        //     cursorExec->saveState();
+        //     cursorExec->detachFromOperationContext();
 
-        // Generate the response object to send to the client.
-        firstBatch.done(cursorId, nss.ns());
-        return true;
+        //     cursor->setLeftoverMaxTimeMicros(txn->getRemainingMaxTimeMicros());
+        //     cursor->setPos(numResults);
+
+        //     // Fill out curop based on the results.
+        //     endQueryOp(txn, collection, *cursorExec, numResults, cursorId);
+        // } else {
+        //     endQueryOp(txn, collection, *exec, numResults, cursorId);
+        // }
+
+        // // Generate the response object to send to the client.
+        // firstBatch.done(cursorId, nss.ns());
+        // return true;
     }
 
 } findCmd;
