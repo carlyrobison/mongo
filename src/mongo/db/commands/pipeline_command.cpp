@@ -208,8 +208,6 @@ public:
         if (!pPipeline.get())
             return false;
 
-        log() << cmdObj.jsonString();
-
         // This is outside of the if block to keep the object alive until the pipeline is finished.
         BSONObj parsed;
         if (kDebugBuild && !pPipeline->isExplain() && !pCtx->inShard) {
