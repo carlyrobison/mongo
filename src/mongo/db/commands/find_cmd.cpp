@@ -180,15 +180,6 @@ public:
                     str::stream() << "Invalid collection name: " << nss.ns()};
         }
 
-        /* If running view code */
-        // BSONObj explainCmd = convertToAggregate(cmdObj, true);
-        // Command *c = Command::findCommand("aggregate");
-        // std::string errMsg;
-        // bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
-        // if (retVal) {
-        //     return Status::OK();
-        // }
-
         // Parse the command BSON to a LiteParsedQuery.
         const bool isExplain = true;
         auto lpqStatus = LiteParsedQuery::makeFromFindCommand(nss, cmdObj, isExplain);
@@ -211,6 +202,17 @@ public:
         // an execution tree with an EOFStage.
         Collection* collection = ctx.getCollection();
 
+        /* Collection does not exist - check for a view */
+        if (!collection) {
+            // BSONObj explainCmd = convertToAggregate(cmdObj, true);
+            // Command *c = Command::findCommand("aggregate");
+            // std::string errMsg;
+            // bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
+            // if (retVal) {
+            //     return Status::OK();
+            // }
+        }
+        
         // We have a parsed query. Time to get the execution plan for it.
         auto statusWithPlanExecutor =
             getExecutorFind(txn, collection, nss, std::move(cq), PlanExecutor::YIELD_AUTO);
@@ -248,12 +250,6 @@ public:
 
         // Although it is a command, a find command gets counted as a query.
         globalOpCounters.gotQuery();
-        BSONObj match = convertToAggregate(cmdObj, false);
-
-        /* If command is executed on a view */
-        // Command *c = Command::findCommand("aggregate");
-        // bool retval = c->run(txn, dbname, match, options, errmsg, result);
-        // return retval;
 
         if (txn->getClient()->isInDirectClient()) {
             return appendCommandStatus(
@@ -300,6 +296,14 @@ public:
         // Acquire locks.
         AutoGetCollectionForRead ctx(txn, nss);
         Collection* collection = ctx.getCollection();
+
+        // Collection does not exist. Check for a view instead
+        if (!collection) {
+            // BSONObj match = convertToAggregate(cmdObj, false);
+            // Command *c = Command::findCommand("aggregate");
+            // bool retval = c->run(txn, dbname, match, options, errmsg, result);
+            // return retval;
+        }
 
         // Get the execution plan for the query.
         auto statusWithPlanExecutor =
