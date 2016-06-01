@@ -61,44 +61,60 @@ namespace {
 const char kTermField[] = "term";
 
 BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
-    BSONObjIterator it(cmd);
     BSONObjBuilder b;
     
     std::vector<BSONObj> pipeline;
+
+    // Do not support single batch
+    if (cmd.getBoolField("singleBatch")) {
+        return BSONObj();
+    }
     
     // Build the pipeline
     if (cmd.hasField("filter")) {
-        BSONObjBuilder match;
-        match.append("$match", cmd.getObjectField("filter"));
-        pipeline.push_back(match.obj());
-    }
-    if (cmd.hasField("limit")) {
-        BSONObjBuilder limit;
-        limit.append("$limit", cmd["limit"].numberInt());
-        pipeline.push_back(limit.obj());
+        BSONObj value = cmd.getObjectField("filter");
+        if (value.hasField("$where") || value.hasField("geo") || 
+            value.hasField("$elemMatch") || value.hasField("loc")) {
+            // Do not support $where, $near, or $elemMatch
+            return BSONObj();
+        }
+        pipeline.push_back(BSON("$match" << value));
     }
     if (cmd.hasField("sort")) {
-        BSONObjBuilder sort;
-        sort.append("$sort", cmd.getObjectField("sort"));
-        pipeline.push_back(sort.obj());
+        BSONObj value = cmd.getObjectField("sort");
+        if (value.hasField("$natural")) {
+            // Do not support $natural
+            return BSONObj();
+        }
+        pipeline.push_back(BSON("$sort" << value));
+    }
+    if (cmd.hasField("skip")) {
+        pipeline.push_back(BSON("$skip" << cmd.getIntField("skip")));
+    }
+    if (cmd.hasField("limit")) {
+        pipeline.push_back(BSON("$limit" << cmd.getIntField("limit")));
     }
     if (cmd.hasField("projection")) {
-        BSONObjBuilder project;
-        project.append("$project", cmd.getObjectField("projection"));
-        pipeline.push_back(project.obj());
+        BSONObj value = cmd.getObjectField("projection");
+        if (!value.isEmpty()) {
+            pipeline.push_back(BSON("$project" << value));
+        }   
     }
 
     b.append("aggregate", cmd["find"].str());
     b.append("pipeline", pipeline);
 
     if (cmd.hasField("batchSize")) {
-        BSONObjBuilder batchSize;
-        batchSize.append("batchSize", cmd["batchSize"].numberInt());
-        b.append("cursor", batchSize.obj());
+        b.append("cursor", BSON("batchSize" << cmd.getIntField("batchSize")));
     }
-
+    else {
+        b.append("cursor", BSONObj());
+    }
     if (hasExplain) {
         b.append("explain", true);
+    }
+    if (cmd.hasField("maxTimeMS")) {
+        b.append("maxTimeMS", cmd.getIntField("maxTimeMS"));
     }
    
     return b.obj();
@@ -204,13 +220,15 @@ public:
 
         /* Collection does not exist - check for a view */
         if (!collection) {
-            // BSONObj explainCmd = convertToAggregate(cmdObj, true);
-            // Command *c = Command::findCommand("aggregate");
-            // std::string errMsg;
-            // bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
-            // if (retVal) {
-            //     return Status::OK();
-            // }
+            BSONObj explainCmd = convertToAggregate(cmdObj, true);
+            if (!explainCmd.isEmpty()) {
+                Command *c = Command::findCommand("aggregate");
+                std::string errMsg;
+                bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
+                if (retVal) {
+                    return Status::OK();
+                }
+            }
         }
         
         // We have a parsed query. Time to get the execution plan for it.
@@ -293,16 +311,22 @@ public:
         }
         std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
 
-        // Acquire locks.
-        AutoGetCollectionForRead ctx(txn, nss);
-        Collection* collection = ctx.getCollection();
-
+        // Acquire locks. 
+        boost::optional<AutoGetCollectionForRead> ctx;
+        ctx.emplace(txn, nss);
+        Collection* collection = ctx->getCollection();
+        
         // Collection does not exist. Check for a view instead
-        if (!collection) {
-            // BSONObj match = convertToAggregate(cmdObj, false);
-            // Command *c = Command::findCommand("aggregate");
-            // bool retval = c->run(txn, dbname, match, options, errmsg, result);
-            // return retval;
+        if (collection) {
+            BSONObj match = convertToAggregate(cmdObj, false);
+            log() << cmdObj.jsonString();
+            if (!match.isEmpty()) {
+                log() << match.jsonString();
+                ctx = boost::none;
+                Command *c = Command::findCommand("aggregate");
+                bool retval = c->run(txn, dbname, match, options, errmsg, result);
+                return retval;
+            }
         }
 
         // Get the execution plan for the query.

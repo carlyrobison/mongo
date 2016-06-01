@@ -31,6 +31,7 @@
 #include "mongo/platform/basic.h"
 
 #include <vector>
+#include <cctype>
 
 #include "mongo/db/auth/action_set.h"
 #include "mongo/db/auth/action_type.h"
@@ -199,6 +200,8 @@ public:
             return false;
         }
         NamespaceString nss(ns);
+
+        // log() << cmdObj.jsonString();
 
         intrusive_ptr<ExpressionContext> pCtx = new ExpressionContext(txn, nss);
         pCtx->tempDir = storageGlobalParams.dbpath + "/_tmp";
