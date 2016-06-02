@@ -50,6 +50,51 @@ using std::unique_ptr;
 using std::string;
 using std::stringstream;
 
+BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
+    log() << cmd.jsonString();
+    BSONObjBuilder b;
+    std::vector<BSONObj> pipeline;
+
+    // Do not support single batch
+    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || 
+        cmd.hasField("maxScan") || cmd.hasField("max") || cmd.hasField("min") ||
+        cmd.hasField("returnKey") || cmd.hasField("tailable") || cmd.hasField("showRecordId") ||
+        cmd.hasField("snapshot") || cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
+        cmd.hasField("awaitData") || cmd.hasField("allowPartialResults")) {
+        return BSONObj();
+    }
+    
+    // Build the pipeline
+    if (cmd.hasField("query")) {
+        BSONObj value = cmd.getObjectField("query");
+        if (value.hasField("$where") || value.hasField("geo") || 
+            value.hasField("$elemMatch") || value.hasField("loc")) {
+            // Do not support $where, $near, or $elemMatch
+            return BSONObj();
+        }
+        pipeline.push_back(BSON("$match" << value));
+    }
+    if (cmd.hasField("skip")) {
+        pipeline.push_back(BSON("$skip" << cmd.getIntField("skip")));
+    }
+    if (cmd.hasField("limit")) {
+        int value = cmd.getIntField("limit");
+        if (value < 0) value = -value;
+        pipeline.push_back(BSON("$limit" << value));
+    }
+
+    pipeline.push_back(BSON("$group" << BSON("_id" << BSONNULL << "count" << BSON("$sum" << 1))));
+
+    b.append("aggregate", cmd["count"].str());
+    b.append("pipeline", pipeline);
+
+    if (cmd.hasField("maxTimeMS")) {
+        b.append("maxTimeMS", cmd.getIntField("maxTimeMS"));
+    }
+
+    return b.obj();
+}
+
 /**
  * Implements the MongoD side of the count command.
  */
@@ -123,7 +168,7 @@ public:
     virtual bool run(OperationContext* txn,
                      const string& dbname,
                      BSONObj& cmdObj,
-                     int,
+                     int options,
                      string& errmsg,
                      BSONObjBuilder& result) {
         auto request = CountRequest::parseFromBSON(dbname, cmdObj);
@@ -131,8 +176,25 @@ public:
             return appendCommandStatus(result, request.getStatus());
         }
 
-        AutoGetCollectionForRead ctx(txn, request.getValue().getNs());
-        Collection* collection = ctx.getCollection();
+        log() << cmdObj.jsonString();
+
+        // Acquire locks.
+        const NamespaceString nss(parseNs(dbname, cmdObj)); 
+        boost::optional<AutoGetCollectionForRead> ctx;
+        ctx.emplace(txn, nss);
+        Collection* collection = ctx->getCollection();
+
+        // Collection does not exist. Check for a view instead
+        if (collection) {
+            BSONObj agg = convertToAggregate(cmdObj, false);
+            if (!agg.isEmpty()) {
+                log() << agg.jsonString();
+                ctx = boost::none;
+                Command *c = Command::findCommand("aggregate");
+                bool retval = c->run(txn, dbname, agg, options, errmsg, result);
+                return retval;
+            }
+        }
 
         // Prevent chunks from being cleaned up during yields - this allows us to only check the
         // version on initial entry into count.

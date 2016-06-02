@@ -382,8 +382,24 @@ DBQuery.prototype.count = function(applySkipLimit) {
     var cmd = this._convertToCountCmd(applySkipLimit);
 
     var res = this._db.runReadCommand(cmd);
-    if (res && res.n != null)
-        return res.n;
+    // print(tojson(res));
+    if (res) {
+        var queryCount = res.n;
+        var aggCount = null;
+        if (res.result) {
+            if (res.result.length > 0) {
+                aggCount = res.result[0].count;
+            } else {
+                aggCount = 0;
+            }
+        }
+        if (queryCount) {
+            return queryCount;
+        }
+        if (aggCount != null) {
+            return aggCount;
+        }
+    }
     throw _getErrorWithCode(res, "count failed: " + tojson(res));
 };
 

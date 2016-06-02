@@ -61,11 +61,11 @@ namespace {
 const char kTermField[] = "term";
 
 BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
+    log() << cmd.jsonString();
     BSONObjBuilder b;
-    
     std::vector<BSONObj> pipeline;
 
-    // Do not support single batch
+    // Options that we do not support
     if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || 
         cmd.hasField("maxScan") || cmd.hasField("max") || cmd.hasField("min") ||
         cmd.hasField("returnKey") || cmd.hasField("tailable") || cmd.hasField("showRecordId") ||
@@ -77,9 +77,9 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     // Build the pipeline
     if (cmd.hasField("filter")) {
         BSONObj value = cmd.getObjectField("filter");
+        // We do not support these operators
         if (value.hasField("$where") || value.hasField("geo") || 
             value.hasField("$elemMatch") || value.hasField("loc")) {
-            // Do not support $where, $near, or $elemMatch
             return BSONObj();
         }
         pipeline.push_back(BSON("$match" << value));
@@ -101,12 +101,22 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     if (cmd.hasField("projection")) {
         BSONObj value = cmd.getObjectField("projection");
         if (!value.isEmpty()) {
+            bool hasOutputField = false;
+            for (BSONElement e: value) {
+                const char * fieldName = e.fieldName();
+                if (StringData(fieldName) != "_id" && e.numberInt() == 1) {
+                    hasOutputField = true;
+                    break;
+                }
+            }
+            if (!hasOutputField) {
+                return BSONObj();
+            }
             pipeline.push_back(BSON("$project" << value));
         }
         for (BSONElement e: value) {
             // Only support simple 0 or 1 projection
             const char * fieldName = e.fieldName();
-            // log() << fieldName << "size: " << e.fieldNameSize() << "last char: " << fieldName[e.fieldNameSize() - 1];
             if (fieldName[e.fieldNameSize() - 2] == '$') {
                 return BSONObj();
             }
@@ -334,7 +344,6 @@ public:
         // Collection does not exist. Check for a view instead
         if (collection) {
             BSONObj match = convertToAggregate(cmdObj, false);
-            log() << cmdObj.jsonString();
             if (!match.isEmpty()) {
                 log() << match.jsonString();
                 ctx = boost::none;
