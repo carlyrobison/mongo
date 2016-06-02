@@ -66,7 +66,11 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     std::vector<BSONObj> pipeline;
 
     // Do not support single batch
-    if (cmd.getBoolField("singleBatch")) {
+    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || 
+        cmd.hasField("maxScan") || cmd.hasField("max") || cmd.hasField("min") ||
+        cmd.hasField("returnKey") || cmd.hasField("tailable") || cmd.hasField("showRecordId") ||
+        cmd.hasField("snapshot") || cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
+        cmd.hasField("awaitData") || cmd.hasField("allowPartialResults")) {
         return BSONObj();
     }
     
@@ -98,6 +102,17 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
         BSONObj value = cmd.getObjectField("projection");
         if (!value.isEmpty()) {
             pipeline.push_back(BSON("$project" << value));
+        }
+        for (BSONElement e: value) {
+            // Only support simple 0 or 1 projection
+            const char * fieldName = e.fieldName();
+            // log() << fieldName << "size: " << e.fieldNameSize() << "last char: " << fieldName[e.fieldNameSize() - 1];
+            if (fieldName[e.fieldNameSize() - 2] == '$') {
+                return BSONObj();
+            }
+            if (!e.isNumber()) {
+                return BSONObj();
+            }
         }   
     }
 
