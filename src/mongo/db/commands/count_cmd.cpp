@@ -41,6 +41,7 @@
 #include "mongo/db/query/plan_summary_stats.h"
 #include "mongo/db/range_preserver.h"
 #include "mongo/db/repl/replication_coordinator_global.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -178,23 +179,22 @@ public:
 
         log() << cmdObj.jsonString();
 
-        // Acquire locks.
         const NamespaceString nss(parseNs(dbname, cmdObj)); 
-        boost::optional<AutoGetCollectionForRead> ctx;
-        ctx.emplace(txn, nss);
-        Collection* collection = ctx->getCollection();
 
-        // Collection does not exist. Check for a view instead
-        if (collection) {
+        // Are we counting on a view?
+        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
             BSONObj agg = convertToAggregate(cmdObj, false);
             if (!agg.isEmpty()) {
-                log() << agg.jsonString();
-                ctx = boost::none;
                 Command *c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, agg, options, errmsg, result);
                 return retval;
             }
         }
+
+        // Acquire locks.
+        boost::optional<AutoGetCollectionForRead> ctx;
+        ctx.emplace(txn, nss);
+        Collection* collection = ctx->getCollection();
 
         // Prevent chunks from being cleaned up during yields - this allows us to only check the
         // version on initial entry into count.
