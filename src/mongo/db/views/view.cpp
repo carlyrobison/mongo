@@ -53,8 +53,6 @@ ViewDefinition::ViewDefinition(StringData ns,
 }
 
 boost::intrusive_ptr<Pipeline> ViewDefinition::concatenate(boost::intrusive_ptr<Pipeline> other) {
-    invariant(!_pipeline.empty());
-
     // Make a copy of the source pipeline.
     Pipeline::SourceContainer newContainer(_pipeline);
 

@@ -89,10 +89,9 @@ Status ViewCatalog::createView(OperationContext* txn,
         uasserted(40140, errmsg);
     }
 
+    // Steal the list of sources for the pipeline. This may be empty (for example, performing a
+    // $match with no specifier.
     auto parsedSources = parsedPipeline->getSources();
-
-    // Parsing will return an empty pipeline if there's an error.
-    uassert(40139, "View requires a valid aggregation pipeline", !parsedSources.empty());
 
     _viewMap[ns.toString()] = stdx::make_unique<ViewDefinition>(ns, backingNs, parsedSources);
     return Status::OK();
