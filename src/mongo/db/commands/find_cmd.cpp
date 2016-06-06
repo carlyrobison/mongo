@@ -52,6 +52,7 @@
 #include "mongo/db/s/collection_sharding_state.h"
 #include "mongo/db/server_parameters.h"
 #include "mongo/db/stats/counters.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -66,19 +67,19 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     std::vector<BSONObj> pipeline;
 
     // Options that we do not support
-    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || 
+    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") ||
         cmd.hasField("maxScan") || cmd.hasField("max") || cmd.hasField("min") ||
         cmd.hasField("returnKey") || cmd.hasField("tailable") || cmd.hasField("showRecordId") ||
         cmd.hasField("snapshot") || cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
         cmd.hasField("awaitData") || cmd.hasField("allowPartialResults")) {
         return BSONObj();
     }
-    
+
     // Build the pipeline
     if (cmd.hasField("filter")) {
         BSONObj value = cmd.getObjectField("filter");
         // We do not support these operators
-        if (value.hasField("$where") || value.hasField("geo") || 
+        if (value.hasField("$where") || value.hasField("geo") ||
             value.hasField("$elemMatch") || value.hasField("loc")) {
             return BSONObj();
         }
@@ -123,7 +124,7 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
             if (!e.isNumber()) {
                 return BSONObj();
             }
-        }   
+        }
     }
 
     b.append("aggregate", cmd["find"].str());
@@ -141,7 +142,7 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     if (cmd.hasField("maxTimeMS")) {
         b.append("maxTimeMS", cmd.getIntField("maxTimeMS"));
     }
-   
+
     return b.obj();
 }
 
@@ -255,7 +256,7 @@ public:
                 }
             }
         }
-        
+
         // We have a parsed query. Time to get the execution plan for it.
         auto statusWithPlanExecutor =
             getExecutorFind(txn, collection, nss, std::move(cq), PlanExecutor::YIELD_AUTO);
@@ -336,22 +337,20 @@ public:
         }
         std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
 
-        // Acquire locks. 
-        boost::optional<AutoGetCollectionForRead> ctx;
-        ctx.emplace(txn, nss);
-        Collection* collection = ctx->getCollection();
-        
-        // Collection does not exist. Check for a view instead
-        if (collection) {
+        // Check if this query is being performed on a view.
+        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
             BSONObj match = convertToAggregate(cmdObj, false);
             if (!match.isEmpty()) {
-                log() << match.jsonString();
-                ctx = boost::none;
                 Command *c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, match, options, errmsg, result);
                 return retval;
             }
         }
+
+        // Acquire locks.
+        boost::optional<AutoGetCollectionForRead> ctx;
+        ctx.emplace(txn, nss);
+        Collection* collection = ctx->getCollection();
 
         // Get the execution plan for the query.
         auto statusWithPlanExecutor =
