@@ -393,7 +393,7 @@ DBQuery.prototype.count = function(applySkipLimit) {
                 aggCount = 0;
             }
         }
-        if (queryCount) {
+        if (queryCount != null || queryCount != undefined) {
             return queryCount;
         }
         if (aggCount != null) {

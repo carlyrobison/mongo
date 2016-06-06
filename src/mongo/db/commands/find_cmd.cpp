@@ -245,7 +245,7 @@ public:
         Collection* collection = ctx.getCollection();
 
         /* Collection does not exist - check for a view */
-        if (!collection) {
+        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
             BSONObj explainCmd = convertToAggregate(cmdObj, true);
             if (!explainCmd.isEmpty()) {
                 Command *c = Command::findCommand("aggregate");
@@ -339,6 +339,7 @@ public:
 
         // Check if this query is being performed on a view.
         if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+            log() << "Look up on a view";
             BSONObj match = convertToAggregate(cmdObj, false);
             if (!match.isEmpty()) {
                 Command *c = Command::findCommand("aggregate");

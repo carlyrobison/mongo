@@ -183,6 +183,7 @@ public:
 
         // Are we counting on a view?
         if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+            log() << "Look up on a view";
             BSONObj agg = convertToAggregate(cmdObj, false);
             if (!agg.isEmpty()) {
                 Command *c = Command::findCommand("aggregate");
