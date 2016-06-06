@@ -242,6 +242,45 @@ var DB;
     };
 
     /**
+     * Command to create a view based on the specified aggregation pipeline.
+     * Usage: db.createView(name, {view: ..., pipeline: [{...}]})
+     *
+     *  @param {String} name Name of the new view to create
+     *  @param {Object} options Object with options for call. Option object is
+     *  has the following form:
+            {
+                view: String - name of the backing view or collection,
+                pipeline: [{...}] - the aggregation pipeline that defines the view
+            }
+     */
+    DB.prototype.createView = function(name, opt) {
+        var options = opt || {};
+
+        var cmd = {
+            create: name
+        };
+
+        if (options.view == undefined) {
+            throw Error("Must specify a backing view or collection");
+        }
+
+        var pipeline = options.pipeline;
+
+        // Since we allow a single stage pipeline to be specified as an object
+        // in aggregation, we need to account for that here for consistency.
+        if (pipeline != undefined) {
+            if (!Array.isArray(pipeline)) {
+                pipeline = [pipeline];
+                options.pipeline = pipeline;
+            }
+        }
+
+        Object.extend(cmd, options);
+
+        return this._dbCommand(cmd);
+    };
+
+    /**
      * @deprecated use getProfilingStatus
      *  Returns the current profiling level of this database
      *  @return SOMETHING_FIXME or null on error
@@ -430,6 +469,7 @@ var DB;
         print("\tdb.commandHelp(name) returns the help for the command");
         print("\tdb.copyDatabase(fromdb, todb, fromhost)");
         print("\tdb.createCollection(name, { size : ..., capped : ..., max : ... } )");
+        print("\tdb.createView(name, {view: ..., pipeline: [{ ... }]})");
         print("\tdb.createUser(userDocument)");
         print("\tdb.currentOp() displays currently executing operations in the db");
         print("\tdb.dropDatabase()");

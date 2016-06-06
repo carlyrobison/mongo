@@ -51,8 +51,27 @@ using std::unique_ptr;
 using std::string;
 using std::stringstream;
 
+bool isValidQuery(const BSONObj& o) {
+    // log() << "Query: " << o.jsonString();
+    for (BSONElement e: o) {
+        // log() << "Element: " << e;
+        if (e.type() == Object || e.type() == Array) {
+            if (!isValidQuery(e.Obj())) {
+                return false;
+            }
+        } else {
+            StringData fieldName = e.fieldNameStringData();
+            if (fieldName == "$where" || fieldName == "$elemMatch" || 
+                fieldName == "geo" || fieldName == "loc") {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
-    log() << cmd.jsonString();
+    log() << "Converting to aggregate command: " << cmd.jsonString();
     BSONObjBuilder b;
     std::vector<BSONObj> pipeline;
 
@@ -68,9 +87,7 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     // Build the pipeline
     if (cmd.hasField("query")) {
         BSONObj value = cmd.getObjectField("query");
-        if (value.hasField("$where") || value.hasField("geo") || 
-            value.hasField("$elemMatch") || value.hasField("loc")) {
-            // Do not support $where, $near, or $elemMatch
+        if (!isValidQuery(value)) {
             return BSONObj();
         }
         pipeline.push_back(BSON("$match" << value));
@@ -182,20 +199,31 @@ public:
         const NamespaceString nss(parseNs(dbname, cmdObj)); 
 
         // Are we counting on a view?
-        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
-            log() << "Look up on a view";
-            BSONObj agg = convertToAggregate(cmdObj, false);
-            if (!agg.isEmpty()) {
-                Command *c = Command::findCommand("aggregate");
-                bool retval = c->run(txn, dbname, agg, options, errmsg, result);
-                return retval;
-            }
-        }
+        // if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+        //     log() << "Look up on a view";
+        //     BSONObj agg = convertToAggregate(cmdObj, false);
+        //     if (!agg.isEmpty()) {
+        //         Command *c = Command::findCommand("aggregate");
+        //         bool retval = c->run(txn, dbname, agg, options, errmsg, result);
+        //         return retval;
+        //     }
+        // }
 
         // Acquire locks.
         boost::optional<AutoGetCollectionForRead> ctx;
         ctx.emplace(txn, nss);
         Collection* collection = ctx->getCollection();
+
+        if (collection) {
+            // log() << "Look up on a view";
+            BSONObj agg = convertToAggregate(cmdObj, false);
+            if (!agg.isEmpty()) {
+                ctx = boost::none;
+                Command *c = Command::findCommand("aggregate");
+                bool retval = c->run(txn, dbname, agg, options, errmsg, result);
+                return retval;
+            }
+        }
 
         // Prevent chunks from being cleaned up during yields - this allows us to only check the
         // version on initial entry into count.

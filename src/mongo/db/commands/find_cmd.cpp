@@ -61,6 +61,25 @@ namespace {
 
 const char kTermField[] = "term";
 
+bool isValidQuery(const BSONObj& o) {
+    // log() << "Query: " << o.jsonString();
+    for (BSONElement e: o) {
+        // log() << "Element: " << e;
+        if (e.type() == Object || e.type() == Array) {
+            if (!isValidQuery(e.Obj())) {
+                return false;
+            }
+        } else {
+            StringData fieldName = e.fieldNameStringData();
+            if (fieldName == "$where" || fieldName == "$elemMatch" || 
+                fieldName == "geo" || fieldName == "loc") {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     log() << cmd.jsonString();
     BSONObjBuilder b;
@@ -79,8 +98,7 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     if (cmd.hasField("filter")) {
         BSONObj value = cmd.getObjectField("filter");
         // We do not support these operators
-        if (value.hasField("$where") || value.hasField("geo") ||
-            value.hasField("$elemMatch") || value.hasField("loc")) {
+        if (!isValidQuery(cmd)) {
             return BSONObj();
         }
         pipeline.push_back(BSON("$match" << value));
@@ -244,7 +262,7 @@ public:
         // an execution tree with an EOFStage.
         Collection* collection = ctx.getCollection();
 
-        /* Collection does not exist - check for a view */
+        /* Check if this is running on a view */
         if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
             BSONObj explainCmd = convertToAggregate(cmdObj, true);
             if (!explainCmd.isEmpty()) {
