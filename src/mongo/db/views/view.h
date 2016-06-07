@@ -32,10 +32,11 @@
 
 #include <boost/intrusive_ptr.hpp>
 #include <memory>
+#include <vector>
 
 #include "mongo/base/string_data.h"
+#include "mongo/bson/bsonobj.h"
 #include "mongo/db/operation_context.h"
-#include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/pipeline.h"
 
 namespace mongo {
@@ -46,8 +47,8 @@ class BSONObj;
 // Represents a "view"; that is, a visible subset of a collection or another view.
 class ViewDefinition {
 public:
-    // typedef std::list<boost::intrusive_ptr<DocumentSource>> SourceContainer;
-    ViewDefinition(StringData ns, StringData backingNs, const Pipeline::SourceContainer& _pipeline);
+
+    ViewDefinition(StringData ns, StringData backingNs, BSONObj def);
 
     StringData ns() const {
         return StringData(_ns);
@@ -57,18 +58,16 @@ public:
         return StringData(_backingNs);
     }
 
-    const Pipeline::SourceContainer& pipeline() const {
+    BSONObj pipeline() const {
         return _pipeline;
     }
 
-    /**
-     * Concatenate this view's pipeline with the argument (in that order).
-     */
-    boost::intrusive_ptr<Pipeline> concatenate(boost::intrusive_ptr<Pipeline> other);
+    static BSONObj getAggregateCommand(std::string rootNs, BSONObj& cmd, std::vector<BSONObj> pipeline);
+
 
 private:
     std::string _ns;         // The namespace of the view.
-    std::string _backingNs;  // The namespace of the collection upon which the view is based.
-    Pipeline::SourceContainer _pipeline;
+    std::string _backingNs;  // The namespace of the view/collection upon which the view is based.
+    BSONObj _pipeline;
 };
 }  // namespace mongo

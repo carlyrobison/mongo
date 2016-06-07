@@ -64,7 +64,7 @@ public:
     Status createView(OperationContext* txn,
                       StringData viewNs,
                       StringData backingNs,
-                      const BSONObj& pipeline);
+                      BSONObj pipeline);
 
     /**
      * Look up the namespace in the view catalog, returning a pointer to a View definition, or
@@ -80,8 +80,11 @@ public:
      *
      * @returns A pair containing the fully-qualified namespace and pipeline for an aggregation.
      */
-    std::tuple<std::string, boost::intrusive_ptr<Pipeline>> resolveView(
-        OperationContext* txn, StringData ns, boost::intrusive_ptr<Pipeline> pipeline);
+    // std::tuple<std::string, boost::intrusive_ptr<Pipeline>> resolveView(
+    //     OperationContext* txn, StringData ns, boost::intrusive_ptr<Pipeline> pipeline);
+
+    std::tuple<std::string, std::vector<BSONObj>> resolveView(
+        OperationContext* txn, StringData ns);
 
 private:
     ViewMap _viewMap;

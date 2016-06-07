@@ -74,26 +74,27 @@ ViewCatalog* ViewCatalog::getInstance() {
 Status ViewCatalog::createView(OperationContext* txn,
                                StringData ns,
                                StringData backingNs,
-                               const BSONObj& pipeline) {
+                               BSONObj pipeline) {
+
     if (ViewCatalog::lookup(txn, ns)) {
         LOG(3) << "VIEWS: Attempted to create a duplicate view";
         return Status(ErrorCodes::NamespaceExists, "Namespace already exists");
     }
 
     // Parse the pipeline, then steal its list of DocumentSources.
-    std::string errmsg;
-    errmsg.reserve(1024);
-    auto parsedPipeline =
-        Pipeline::parseCommand(errmsg, convertToAggregation(backingNs, pipeline), nullptr);
-    if (!errmsg.empty()) {
-        uasserted(40140, errmsg);
-    }
+    // std::string errmsg;
+    // errmsg.reserve(1024);
+    // auto parsedPipeline =
+    //     Pipeline::parseCommand(errmsg, convertToAggregation(backingNs, pipeline), nullptr);
+    // if (!errmsg.empty()) {
+    //     uasserted(40140, errmsg);
+    // }
 
     // Steal the list of sources for the pipeline. This may be empty (for example, performing a
     // $match with no specifier.
-    auto parsedSources = parsedPipeline->getSources();
+    // auto parsedSources = parsedPipeline->getSources();
 
-    _viewMap[ns.toString()] = stdx::make_unique<ViewDefinition>(ns, backingNs, parsedSources);
+    _viewMap[ns.toString()] = stdx::make_unique<ViewDefinition>(ns, backingNs, pipeline);
     return Status::OK();
 }
 
@@ -105,12 +106,36 @@ ViewDefinition* ViewCatalog::lookup(OperationContext* txn, StringData ns) {
         return (result->second).get();
 }
 
-std::tuple<std::string, boost::intrusive_ptr<Pipeline>> ViewCatalog::resolveView(
-    OperationContext* txn, StringData ns, boost::intrusive_ptr<Pipeline> pipeline) {
+// std::tuple<std::string, boost::intrusive_ptr<Pipeline>> ViewCatalog::resolveView(
+//     OperationContext* txn, StringData ns, boost::intrusive_ptr<Pipeline> pipeline) {
+//     LOG(3) << "VIEWS: attempting to resolve " << ns;
+
+//     StringData backingNs = ns;
+//     boost::intrusive_ptr<Pipeline> newPipeline = pipeline;
+
+//     for (auto i = ViewCatalog::kMaxViewDepth; i > 0; i--) {
+//         auto numberOfAttempts = ViewCatalog::kMaxViewDepth - i;
+//         LOG(3) << "VIEWS: resolution attempt #" << numberOfAttempts;
+//         ViewDefinition* view = lookup(txn, backingNs);
+//         if (!view) {
+//             std::string backingNsString = backingNs.toString();
+//             return std::tie(backingNsString, newPipeline);
+//         }
+
+//         backingNs = view->backingNs();
+//         newPipeline = view->concatenate(newPipeline);
+//     }
+
+//     uasserted(ErrorCodes::ViewRecursionLimitExceeded, "view depth too deep or view cycle detected");
+//     MONGO_UNREACHABLE;
+// }
+
+std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(
+    OperationContext* txn, StringData ns) {
     LOG(3) << "VIEWS: attempting to resolve " << ns;
 
     StringData backingNs = ns;
-    boost::intrusive_ptr<Pipeline> newPipeline = pipeline;
+    std::vector<BSONObj> newPipeline;
 
     for (auto i = ViewCatalog::kMaxViewDepth; i > 0; i--) {
         auto numberOfAttempts = ViewCatalog::kMaxViewDepth - i;
@@ -121,8 +146,13 @@ std::tuple<std::string, boost::intrusive_ptr<Pipeline>> ViewCatalog::resolveView
             return std::tie(backingNsString, newPipeline);
         }
 
+
+
         backingNs = view->backingNs();
-        newPipeline = view->concatenate(newPipeline);
+
+        log() << "backingNS: " << backingNs;
+        log() << "pipeline: " << view->pipeline();
+        newPipeline.push_back(view->pipeline());
     }
 
     uasserted(ErrorCodes::ViewRecursionLimitExceeded, "view depth too deep or view cycle detected");

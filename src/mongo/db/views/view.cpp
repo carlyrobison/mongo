@@ -47,28 +47,29 @@ namespace mongo {
 
 ViewDefinition::ViewDefinition(StringData ns,
                                StringData backingNs,
-                               const Pipeline::SourceContainer& aggSources)
-    : _ns(ns.toString()), _backingNs(backingNs.toString()), _pipeline(aggSources) {
-    LOG(3) << "VIEWS: Constructed a new view " << ns << " on namespace " << backingNs;
+                               BSONObj pipeline)
+    : _ns(ns.toString()), _backingNs(backingNs.toString()) {
+        _pipeline = pipeline.getObjectField("0");
+        log() << "VIEWS: Constructed a new view " << ns << " with pipeline: " << _pipeline.jsonString();
 }
 
-boost::intrusive_ptr<Pipeline> ViewDefinition::concatenate(boost::intrusive_ptr<Pipeline> other) {
-    // Make a copy of the source pipeline.
-    Pipeline::SourceContainer newContainer(_pipeline);
-
-    LOG(3) << "VIEWS: Appending the following sources to _pipeline";
-    for (auto docSource : other->getSources()) {
-        LOG(3) << "VIEWS: " << docSource->getSourceName();
-        newContainer.push_back(docSource);
+BSONObj ViewDefinition::getAggregateCommand(std::string rootNs, BSONObj& cmd, std::vector<BSONObj> pipeline) {
+    BSONObjBuilder b;
+    for (BSONElement e: cmd) {
+        StringData fieldName = e.fieldNameStringData();
+        if (fieldName == "pipeline") {
+            BSONObj p = e.embeddedObject();
+            for (BSONElement el: p) {
+                pipeline.push_back(el.Obj());
+            }
+            b.append("pipeline", pipeline);
+        } else if (fieldName == "aggregate") {
+            b.append("aggregate", rootNs);
+        } else {
+            b.append(e);
+        }
     }
-
-    LOG(3) << "VIEWS: Iterating through concatenated pipeline";
-    for (auto docSource : newContainer) {
-        LOG(3) << "VIEWS: " << docSource->getSourceName();
-    }
-
-    // Construct the result from the new pipeline, reattaching to other's ExpressionContext.
-    boost::intrusive_ptr<Pipeline> result(new Pipeline(newContainer, other->getContext()));
-    return result;
+    return b.obj();
 }
+
 }  // namespace mongo

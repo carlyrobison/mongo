@@ -63,6 +63,20 @@
 
 namespace mongo {
 
+namespace {
+// BSONObj concatenate(BSONObj b1, BSONObj b2) {
+//     BSONObjBuilder b;
+//     std::vector<BSONObj> pipeline;
+//     for (BSONElement e: b2.getObjectField("pipeline")) {
+//         pipeline.push_back(e.Obj());
+//     }
+//     for (BSONElement e: b2.getObjectField("pipeline")) {
+//         pipeline.push_back(e.Obj());
+//     }
+//     return b.append("pipeline", pipeline).obj();
+// }
+}
+
 using boost::intrusive_ptr;
 using std::endl;
 using std::shared_ptr;
@@ -201,7 +215,24 @@ public:
         }
         NamespaceString nss(ns);
 
-        log() << cmdObj.jsonString();
+        // Check if this query is being performed on a view.
+        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+            // If the collection can't be found, attempt to resolve the namespace as a view.
+            auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, nss.ns());
+            std::string rootNs = std::get<0>(newAggregation);
+            std::vector<BSONObj> viewPipeline = std::get<1>(newAggregation);
+
+            log() << "Root NS: " << rootNs;
+            for (auto& item: viewPipeline) {
+                log() << "Stage: " << item.jsonString();
+            }
+
+            BSONObj viewCmd = ViewDefinition::getAggregateCommand(rootNs, cmdObj, viewPipeline);
+
+            log() << "View command: " << viewCmd;
+        }
+
+        // log() << cmdObj.jsonString();
 
         intrusive_ptr<ExpressionContext> pCtx = new ExpressionContext(txn, nss);
         pCtx->tempDir = storageGlobalParams.dbpath + "/_tmp";
@@ -227,11 +258,11 @@ public:
         unique_ptr<PlanExecutor> exec;
         {
             // If the collection can't be found, attempt to resolve the namespace as a view.
-            auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, nss.ns(), pPipeline);
+            // auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, nss.ns(), pPipeline);
 
             // This is our final pipeline: a modified one for a view, or the original if it's not a
             // view.
-            pPipeline = std::get<1>(newAggregation);
+            // pPipeline = std::get<1>(newAggregation);
 
             // Acquire locks.
             // This will throw if the sharding version for this connection is out of date. The
@@ -240,7 +271,7 @@ public:
             // sharding version that we synchronize on here. This is also why we always need to
             // create a ClientCursor even when we aren't outputting to a cursor. See the comment
             // on ShardFilterStage for more details.
-            AutoGetCollectionForRead ctx(txn, std::get<0>(newAggregation));
+            AutoGetCollectionForRead ctx(txn, ns);
             Collection* collection = ctx.getCollection();
 
             // This does mongod-specific stuff like creating the input PlanExecutor and adding
