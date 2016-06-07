@@ -201,7 +201,7 @@ public:
         }
         NamespaceString nss(ns);
 
-        // log() << cmdObj.jsonString();
+        log() << cmdObj.jsonString();
 
         intrusive_ptr<ExpressionContext> pCtx = new ExpressionContext(txn, nss);
         pCtx->tempDir = storageGlobalParams.dbpath + "/_tmp";

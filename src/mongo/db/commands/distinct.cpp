@@ -30,6 +30,8 @@
 
 #define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kQuery
 
+#include "mongo/platform/basic.h"
+
 #include <string>
 #include <vector>
 
@@ -51,6 +53,7 @@
 #include "mongo/db/query/get_executor.h"
 #include "mongo/db/query/plan_summary_stats.h"
 #include "mongo/db/query/query_planner_common.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/log.h"
 #include "mongo/util/timer.h"
@@ -66,6 +69,68 @@ namespace {
 const char kKeyField[] = "key";
 const char kQueryField[] = "query";
 const char kCollationField[] = "collation";
+
+bool isValidQuery(const BSONObj& o) {
+    // log() << "Query: " << o.jsonString();
+    for (BSONElement e: o) {
+        // log() << "Element: " << e;
+        if (e.type() == Object || e.type() == Array) {
+            if (!isValidQuery(e.Obj())) {
+                return false;
+            }
+        } else {
+            StringData fieldName = e.fieldNameStringData();
+            if (fieldName == "$where" || fieldName == "$elemMatch" || 
+                fieldName == "geo" || fieldName == "loc") {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
+    log() << cmd.jsonString();
+    BSONObjBuilder b;
+    std::vector<BSONObj> pipeline;
+
+    // Options that we do not support
+    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") ||
+        cmd.hasField("maxScan") || cmd.hasField("max") || cmd.hasField("min") ||
+        cmd.hasField("returnKey") || cmd.hasField("tailable") || cmd.hasField("showRecordId") ||
+        cmd.hasField("snapshot") || cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
+        cmd.hasField("awaitData") || cmd.hasField("allowPartialResults")) {
+        return BSONObj();
+    }
+
+    // Build the pipeline
+    if (cmd.hasField("query")) {
+        BSONObj value = cmd.getObjectField("query");
+        // We do not support these operators
+        if (!isValidQuery(cmd)) {
+            return BSONObj();
+        }
+        pipeline.push_back(BSON("$match" << value));
+    }
+
+    if (cmd.hasField("key")) {
+        std::string value = cmd.getStringField("key");
+        BSONObj group = BSON("$group" << BSON("_id" << BSONNULL << value << BSON("$addToSet" << "$" + value)));
+        pipeline.push_back(group);
+    }
+
+    b.append("aggregate", cmd["distinct"].str());
+    b.append("pipeline", pipeline);
+
+    if (hasExplain) {
+        b.append("explain", true);
+    }
+    if (cmd.hasField("maxTimeMS")) {
+        b.append("maxTimeMS", cmd.getIntField("maxTimeMS"));
+    }
+
+    return b.obj();
+}
 
 }  // namespace
 
@@ -163,13 +228,27 @@ public:
                            ExplainCommon::Verbosity verbosity,
                            const rpc::ServerSelectionMetadata&,
                            BSONObjBuilder* out) const {
-        const string ns = parseNs(dbname, cmdObj);
-        AutoGetCollectionForRead ctx(txn, ns);
+        const NamespaceString nss(parseNs(dbname, cmdObj));
+
+        // Check if this query is being performed on a view.
+        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+            BSONObj explainCmd = convertToAggregate(cmdObj, true);
+            if (!explainCmd.isEmpty()) {
+                Command *c = Command::findCommand("aggregate");
+                std::string errMsg;
+                bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
+                if (retVal) {
+                    return Status::OK();
+                }
+            }
+        }
+
+        AutoGetCollectionForRead ctx(txn, nss.ns());
 
         Collection* collection = ctx.getCollection();
 
         StatusWith<unique_ptr<PlanExecutor>> executor =
-            getPlanExecutor(txn, collection, ns, cmdObj, true);
+            getPlanExecutor(txn, collection, nss.ns(), cmdObj, true);
         if (!executor.isOK()) {
             return executor.getStatus();
         }
@@ -181,17 +260,28 @@ public:
     bool run(OperationContext* txn,
              const string& dbname,
              BSONObj& cmdObj,
-             int,
+             int options,
              string& errmsg,
              BSONObjBuilder& result) {
         Timer t;
 
-        const string ns = parseNs(dbname, cmdObj);
-        AutoGetCollectionForRead ctx(txn, ns);
+        const NamespaceString nss(parseNs(dbname, cmdObj));
+
+        // Check if this query is being performed on a view.
+        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+            BSONObj agg = convertToAggregate(cmdObj, false);
+            if (!agg.isEmpty()) {
+                Command *c = Command::findCommand("aggregate");
+                bool retval = c->run(txn, dbname, agg, options, errmsg, result);
+                return retval;
+            }
+        }
+
+        AutoGetCollectionForRead ctx(txn, nss.ns());
 
         Collection* collection = ctx.getCollection();
 
-        auto executor = getPlanExecutor(txn, collection, ns, cmdObj, false);
+        auto executor = getPlanExecutor(txn, collection, nss.ns(), cmdObj, false);
         if (!executor.isOK()) {
             return appendCommandStatus(result, executor.getStatus());
         }
