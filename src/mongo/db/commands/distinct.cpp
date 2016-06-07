@@ -231,7 +231,7 @@ public:
         const NamespaceString nss(parseNs(dbname, cmdObj));
 
         // Check if this query is being performed on a view.
-        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
             BSONObj explainCmd = convertToAggregate(cmdObj, true);
             if (!explainCmd.isEmpty()) {
                 Command *c = Command::findCommand("aggregate");
@@ -268,7 +268,7 @@ public:
         const NamespaceString nss(parseNs(dbname, cmdObj));
 
         // Check if this query is being performed on a view.
-        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
             BSONObj agg = convertToAggregate(cmdObj, false);
             if (!agg.isEmpty()) {
                 Command *c = Command::findCommand("aggregate");

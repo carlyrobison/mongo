@@ -48,7 +48,7 @@ class BSONObj;
 class ViewDefinition {
 public:
 
-    ViewDefinition(StringData ns, StringData backingNs, BSONObj pipeline);
+    ViewDefinition(StringData ns, StringData backingNs, BSONObj& pipeline);
 
     StringData ns() const {
         return StringData(_ns);
@@ -58,20 +58,23 @@ public:
         return StringData(_backingNs);
     }
 
-    BSONObj pipeline() {
+    const std::vector<BSONObj>& pipeline() const {
         return _pipeline;
     }
 
     static BSONObj getAggregateCommand(std::string rootNs, BSONObj& cmd, std::vector<BSONObj> pipeline);
 
     std::string toString() {
-        return _ns + "    " + _pipeline.jsonString();
+        std::string s;
+        for (auto& item: _pipeline) {
+            s += item.jsonString();
+        }
+        return _ns + "    " + _backingNs + "   " + s;
     }
-
 
 private:
     std::string _ns;         // The namespace of the view.
     std::string _backingNs;  // The namespace of the view/collection upon which the view is based.
-    BSONObj _pipeline;
+    std::vector<BSONObj> _pipeline;
 };
 }  // namespace mongo

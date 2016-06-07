@@ -64,7 +64,7 @@ public:
     Status createView(OperationContext* txn,
                       StringData viewNs,
                       StringData backingNs,
-                      BSONObj pipeline);
+                      BSONObj& pipeline);
 
     /**
      * Look up the namespace in the view catalog, returning a pointer to a View definition, or
@@ -73,7 +73,7 @@ public:
      * @param ns The namespace in question
      * @returns A bare pointer to a view definition if ns is a valid view with a backing namespace
      */
-    ViewDefinition* lookup(OperationContext* txn, StringData ns);
+    ViewDefinition* lookup(StringData ns);
 
     /**
      * Resolve the views on the given namespace, transforming the pipeline appropriately.

@@ -47,11 +47,13 @@ namespace mongo {
 
 ViewDefinition::ViewDefinition(StringData ns,
                                StringData backingNs,
-                               BSONObj pipeline)
-    : _ns(ns.toString()), _backingNs(backingNs.toString()) {
-        _pipeline = BSONObj(pipeline.getObjectField("0"));
-        log() << this->toString();
-        log() << "VIEWS: Constructed a new view " << ns << " with pipeline: " << _pipeline.jsonString();
+                               BSONObj& pipeline) {
+    _ns = ns.toString();
+    _backingNs = backingNs.toString();
+    for (BSONElement e: pipeline) {
+        BSONObj value = e.Obj();
+        _pipeline.push_back(value.copy());
+    }
 }
 
 BSONObj ViewDefinition::getAggregateCommand(std::string rootNs, BSONObj& cmd, std::vector<BSONObj> pipeline) {
@@ -65,7 +67,9 @@ BSONObj ViewDefinition::getAggregateCommand(std::string rootNs, BSONObj& cmd, st
             }
             b.append("pipeline", pipeline);
         } else if (fieldName == "aggregate") {
-            b.append("aggregate", rootNs);
+            size_t dotPos = rootNs.find('.');
+            std::string collection = rootNs.substr(dotPos + 1);
+            b.append("aggregate", collection);
         } else {
             b.append(e);
         }

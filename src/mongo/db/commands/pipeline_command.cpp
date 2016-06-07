@@ -208,31 +208,24 @@ public:
                      int options,
                      string& errmsg,
                      BSONObjBuilder& result) {
-        const std::string ns = parseNs(db, cmdObj);
+        std::string ns = parseNs(db, cmdObj);
         if (nsToCollectionSubstring(ns).empty()) {
             errmsg = "missing collection name";
             return false;
         }
-        NamespaceString nss(ns);
+
+        const NamespaceString nss(ns);
 
         // Check if this query is being performed on a view.
-        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+        if (ViewCatalog::getInstance()->lookup(ns)) {
             // If the collection can't be found, attempt to resolve the namespace as a view.
-            auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, nss.ns());
+            auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, ns);
             std::string rootNs = std::get<0>(newAggregation);
             std::vector<BSONObj> viewPipeline = std::get<1>(newAggregation);
-
-            log() << "Root NS: " << rootNs;
-            for (auto& item: viewPipeline) {
-                log() << "Stage: " << item.jsonString();
-            }
-
             BSONObj viewCmd = ViewDefinition::getAggregateCommand(rootNs, cmdObj, viewPipeline);
 
-            log() << "View command: " << viewCmd;
+            return this->run(txn, db, viewCmd, options, errmsg, result);
         }
-
-        // log() << cmdObj.jsonString();
 
         intrusive_ptr<ExpressionContext> pCtx = new ExpressionContext(txn, nss);
         pCtx->tempDir = storageGlobalParams.dbpath + "/_tmp";

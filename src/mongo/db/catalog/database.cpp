@@ -614,7 +614,7 @@ Status userCreateNS(OperationContext* txn,
     if (collection)
         return Status(ErrorCodes::NamespaceExists, "collection already exists");
 
-    ViewDefinition* view = ViewCatalog::getInstance()->lookup(txn, ns);
+    ViewDefinition* view = ViewCatalog::getInstance()->lookup(ns);
 
     if (view)
         return Status(ErrorCodes::NamespaceExists, "view already exists");
@@ -651,8 +651,8 @@ Status userCreateNS(OperationContext* txn,
                           "must define an aggregation pipeline to create a view");
 
         // ns is fully-qualified already, but viewNs is not. Append the database name.
-        StringData fullViewNs(db->name() + "." + viewNs);
-
+        std::string fullViewNs(db->name() + "." + viewNs);
+        
         LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
                << fullViewNs << " with pipeline " << collectionOptions.pipeline;
         return ViewCatalog::getInstance()->createView(

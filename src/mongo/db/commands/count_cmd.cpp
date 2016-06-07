@@ -199,7 +199,7 @@ public:
         const NamespaceString nss(parseNs(dbname, cmdObj)); 
 
         // Are we counting on a view?
-        // if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+        // if (ViewCatalog::getInstance()->lookup(nss.ns())) {
         //     log() << "Look up on a view";
         //     BSONObj agg = convertToAggregate(cmdObj, false);
         //     if (!agg.isEmpty()) {

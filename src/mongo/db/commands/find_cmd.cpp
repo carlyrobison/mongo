@@ -263,7 +263,7 @@ public:
         Collection* collection = ctx.getCollection();
 
         /* Check if this is running on a view */
-        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
             BSONObj explainCmd = convertToAggregate(cmdObj, true);
             if (!explainCmd.isEmpty()) {
                 Command *c = Command::findCommand("aggregate");
@@ -356,7 +356,7 @@ public:
         std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
 
         // Check if this query is being performed on a view.
-        if (ViewCatalog::getInstance()->lookup(txn, nss.ns())) {
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
             log() << "Look up on a view";
             BSONObj match = convertToAggregate(cmdObj, false);
             if (!match.isEmpty()) {
