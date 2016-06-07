@@ -49,7 +49,8 @@ ViewDefinition::ViewDefinition(StringData ns,
                                StringData backingNs,
                                BSONObj pipeline)
     : _ns(ns.toString()), _backingNs(backingNs.toString()) {
-        _pipeline = pipeline.getObjectField("0");
+        _pipeline = BSONObj(pipeline.getObjectField("0"));
+        log() << this->toString();
         log() << "VIEWS: Constructed a new view " << ns << " with pipeline: " << _pipeline.jsonString();
 }
 

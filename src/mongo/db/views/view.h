@@ -48,7 +48,7 @@ class BSONObj;
 class ViewDefinition {
 public:
 
-    ViewDefinition(StringData ns, StringData backingNs, BSONObj def);
+    ViewDefinition(StringData ns, StringData backingNs, BSONObj pipeline);
 
     StringData ns() const {
         return StringData(_ns);
@@ -58,11 +58,15 @@ public:
         return StringData(_backingNs);
     }
 
-    BSONObj pipeline() const {
+    BSONObj pipeline() {
         return _pipeline;
     }
 
     static BSONObj getAggregateCommand(std::string rootNs, BSONObj& cmd, std::vector<BSONObj> pipeline);
+
+    std::string toString() {
+        return _ns + "    " + _pipeline.jsonString();
+    }
 
 
 private:

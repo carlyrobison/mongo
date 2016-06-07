@@ -140,14 +140,13 @@ std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(
     for (auto i = ViewCatalog::kMaxViewDepth; i > 0; i--) {
         auto numberOfAttempts = ViewCatalog::kMaxViewDepth - i;
         LOG(3) << "VIEWS: resolution attempt #" << numberOfAttempts;
+        log() << "Resolving view: " << ns;
         ViewDefinition* view = lookup(txn, backingNs);
         if (!view) {
             std::string backingNsString = backingNs.toString();
             return std::tie(backingNsString, newPipeline);
         }
-
-
-
+        log() << "Resolving view: " << view->toString();
         backingNs = view->backingNs();
 
         log() << "backingNS: " << backingNs;
