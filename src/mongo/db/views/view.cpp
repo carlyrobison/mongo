@@ -45,9 +45,11 @@
 
 namespace mongo {
 
-ViewDefinition::ViewDefinition(StringData ns, StringData backingNs, BSONObj& pipeline) {
-    _ns = ns.toString();
-    _backingNs = backingNs.toString();
+ViewDefinition::ViewDefinition(std::string dbName, std::string viewName, std::string backingViewName, BSONObj& pipeline) {
+    _dbName = dbName;
+    _viewName = viewName;
+    _backingViewName = backingViewName;
+    log() << "CREATING: " << dbName << " " << viewName << " " << backingViewName;
     for (BSONElement e : pipeline) {
         BSONObj value = e.Obj();
         _pipeline.push_back(value.copy());

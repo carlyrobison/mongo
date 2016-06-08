@@ -161,6 +161,20 @@ public:
             return request.getStatus();
         }
 
+        /* Check if this is running on a view */
+        const NamespaceString nss(parseNs(dbname, cmdObj));
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+            BSONObj explainCmd = convertToAggregate(cmdObj, true);
+            if (!explainCmd.isEmpty()) {
+                Command* c = Command::findCommand("aggregate");
+                std::string errMsg;
+                bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
+                if (retVal) {
+                    return Status::OK();
+                }
+            }
+        }
+
         // Acquire the db read lock.
         AutoGetCollectionForRead ctx(txn, request.getValue().getNs());
         Collection* collection = ctx.getCollection();
@@ -200,31 +214,18 @@ public:
         const NamespaceString nss(parseNs(dbname, cmdObj));
 
         // Are we counting on a view?
-        // if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-        //     log() << "Look up on a view";
-        //     BSONObj agg = convertToAggregate(cmdObj, false);
-        //     if (!agg.isEmpty()) {
-        //         Command *c = Command::findCommand("aggregate");
-        //         bool retval = c->run(txn, dbname, agg, options, errmsg, result);
-        //         return retval;
-        //     }
-        // }
-
-        // Acquire locks.
-        boost::optional<AutoGetCollectionForRead> ctx;
-        ctx.emplace(txn, nss);
-        Collection* collection = ctx->getCollection();
-
-        if (collection) {
-            // log() << "Look up on a view";
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
             BSONObj agg = convertToAggregate(cmdObj, false);
             if (!agg.isEmpty()) {
-                ctx = boost::none;
-                Command* c = Command::findCommand("aggregate");
+                Command *c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, agg, options, errmsg, result);
                 return retval;
             }
         }
+
+        // Acquire locks.
+        AutoGetCollectionForRead ctx(txn, nss);
+        Collection* collection = ctx.getCollection();
 
         // Prevent chunks from being cleaned up during yields - this allows us to only check the
         // version on initial entry into count.

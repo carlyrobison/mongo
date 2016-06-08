@@ -41,6 +41,7 @@
 #include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/pipeline.h"
 #include "mongo/db/views/view.h"
+#include "mongo/util/string_map.h"
 
 namespace mongo {
 
@@ -49,7 +50,54 @@ class ViewDefinition;
 // In-memory data structure that holds view definitions
 class ViewCatalog {
 public:
-    using ViewMap = std::map<std::string, std::unique_ptr<ViewDefinition>>;
+    typedef StringMap<ViewDefinition*> ViewMap;
+    // typedef ViewMap = std::map<std::string, std::unique_ptr<ViewDefinition>>;
+
+    /**
+     * Iterating over a ViewCatalog yields ViewDefinition* pointers.
+     * Enable range based for loops
+     */
+    class iterator {
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = ViewDefinition*;
+        using pointer = const value_type*;
+        using reference = const value_type&;
+        using difference_type = ptrdiff_t;
+
+        iterator() = default;
+        iterator(ViewMap::const_iterator it) : _it(it) {}
+
+        reference operator*() const {
+            return _it->second;
+        }
+
+        pointer operator->() const {
+            return &_it->second;
+        }
+
+        bool operator==(const iterator& other) {
+            return _it == other._it;
+        }
+
+        bool operator!=(const iterator& other) {
+            return _it != other._it;
+        }
+
+        iterator& operator++() {
+        ++_it;
+            return *this;
+        }
+
+        iterator operator++(int) {
+            auto oldPosition = *this;
+            ++_it;
+            return oldPosition;
+        }
+
+    private:
+        ViewMap::const_iterator _it;
+    };
 
     static const std::uint32_t kMaxViewDepth;
 
@@ -58,12 +106,23 @@ public:
      */
     static ViewCatalog* getInstance();
 
+    static std::string generateViewNamespace(StringData dbName, StringData viewName);
+
+    iterator begin() const {
+        return iterator(_viewMap.begin());
+    }
+
+    iterator end() const {
+        return iterator(_viewMap.end());
+    }
+
     /**
      * Create a new view.
      */
     Status createView(OperationContext* txn,
-                      StringData viewNs,
-                      StringData backingNs,
+                      std::string dbName,
+                      std::string viewName,
+                      std::string backingName,
                       BSONObj& pipeline);
 
     /**
@@ -74,6 +133,8 @@ public:
      * @returns A bare pointer to a view definition if ns is a valid view with a backing namespace
      */
     ViewDefinition* lookup(StringData ns);
+
+    ViewDefinition* lookup(StringData dbName, StringData viewName);
 
     /**
      * Resolve the views on the given namespace, transforming the pipeline appropriately.

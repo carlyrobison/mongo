@@ -644,19 +644,20 @@ Status userCreateNS(OperationContext* txn,
     }
 
     // If "view" is specified, create a new view. Otherwise, default to creating a collection.
-    std::string viewNs = collectionOptions.viewNamespace;
-    if (!viewNs.empty()) {
+    std::string backingViewName = collectionOptions.viewNamespace;
+    if (!backingViewName.empty()) {
         if (collectionOptions.pipeline.isEmpty())
             return Status(ErrorCodes::BadValue,
                           "must define an aggregation pipeline to create a view");
 
-        // ns is fully-qualified already, but viewNs is not. Append the database name.
-        std::string fullViewNs(db->name() + "." + viewNs);
+        NamespaceString nss(ns);
+        std::string viewName = nss.coll().toString();
+        std::string dbName = nss.db().toString();
 
-        LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
-               << fullViewNs << " with pipeline " << collectionOptions.pipeline;
+        LOG(3) << "VIEWS: userCreateNS attempting to create " << viewName << " as a view on "
+               << backingViewName << " with pipeline " << collectionOptions.pipeline;
         return ViewCatalog::getInstance()->createView(
-            txn, ns, fullViewNs, collectionOptions.pipeline);
+            txn, dbName, viewName, backingViewName, collectionOptions.pipeline);
     } else {
         if (!collectionOptions.pipeline.isEmpty())
             return Status(ErrorCodes::BadValue,

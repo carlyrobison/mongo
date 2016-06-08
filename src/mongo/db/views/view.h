@@ -38,6 +38,7 @@
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/db/pipeline/pipeline.h"
+#include "mongo/util/mongoutils/str.h"
 
 namespace mongo {
 
@@ -47,14 +48,26 @@ class BSONObj;
 // Represents a "view"; that is, a visible subset of a collection or another view.
 class ViewDefinition {
 public:
-    ViewDefinition(StringData ns, StringData backingNs, BSONObj& pipeline);
+    ViewDefinition(std::string dbName, std::string viewName, std::string backingViewName, BSONObj& pipeline);
 
-    StringData ns() const {
-        return StringData(_ns);
+    StringData name() const {
+        return StringData(_viewName);
     }
 
-    StringData backingNs() const {
-        return StringData(_backingNs);
+    StringData backingViewName() const {
+        return StringData(_backingViewName);
+    }
+
+    StringData db() const {
+        return StringData(_dbName);
+    }
+
+    std::string fullViewNs() const {
+        return _dbName + "." + _viewName;
+    }
+
+    std::string fullBackingViewNs() const {
+        return _dbName + "." + _backingViewName;
     }
 
     const std::vector<BSONObj>& pipeline() const {
@@ -65,17 +78,25 @@ public:
                                        BSONObj& cmd,
                                        std::vector<BSONObj> pipeline);
 
+    // Just for debugging right now
     std::string toString() {
-        std::string s;
-        for (auto& item : _pipeline) {
-            s += item.jsonString();
+        str::stream ss;
+        ss << "{name: " << _viewName << " options: {view: " << _backingViewName
+           << ", pipeline: [";
+        for (size_t i = 0; i < _pipeline.size(); i++) {
+            ss << _pipeline[i].toString();
+            if (i != _pipeline.size() - 1) {
+                ss << ",";
+            }
         }
-        return _ns + "    " + _backingNs + "   " + s;
+        ss << "]}}";
+        return ss;
     }
 
 private:
-    std::string _ns;         // The namespace of the view.
-    std::string _backingNs;  // The namespace of the view/collection upon which the view is based.
+    std::string _dbName;
+    std::string _viewName;         // The namespace of the view.
+    std::string _backingViewName;  // The namespace of the view/collection upon which the view is based.
     std::vector<BSONObj> _pipeline;
 };
 }  // namespace mongo

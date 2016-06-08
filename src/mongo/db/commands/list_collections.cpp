@@ -47,6 +47,7 @@
 #include "mongo/db/query/find_common.h"
 #include "mongo/db/service_context.h"
 #include "mongo/db/storage/storage_engine.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/stdx/memory.h"
 
 namespace mongo {
@@ -105,26 +106,10 @@ boost::optional<vector<StringData>> _getExactNameMatches(const MatchExpression* 
  * Does not add any information about the system.namespaces collection, or non-existent collections.
  */
 void _addWorkingSetMember(OperationContext* txn,
-                          const Collection* collection,
+                          const BSONObj& maybe,
                           const MatchExpression* matcher,
                           WorkingSet* ws,
                           QueuedDataStage* root) {
-    if (!collection) {
-        return;
-    }
-
-    StringData collectionName = collection->ns().coll();
-    if (collectionName == "system.namespaces") {
-        return;
-    }
-
-    BSONObjBuilder b;
-    b.append("name", collectionName);
-
-    CollectionOptions options = collection->getCatalogEntry()->getCollectionOptions(txn);
-    b.append("options", options.toBSON());
-
-    BSONObj maybe = b.obj();
     if (matcher && !matcher->matchesBSON(maybe)) {
         return;
     }
@@ -136,6 +121,39 @@ void _addWorkingSetMember(OperationContext* txn,
     member->obj = Snapshotted<BSONObj>(SnapshotId(), maybe);
     member->transitionToOwnedObj();
     root->pushBack(id);
+}
+
+BSONObj buildViewBson(const ViewDefinition* view) {
+
+    if (!view) {
+        return BSONObj();
+    }
+
+    BSONObjBuilder b;
+    b.append("name", view->name());
+    BSONObj options = BSON("view" << view->backingViewName() << "pipeline" << view->pipeline());
+    b.append("options", options);
+    return b.obj();
+}
+
+BSONObj buildCollectionBson(OperationContext* txn, const Collection* collection) {
+
+    if (!collection) {
+        return BSONObj();
+    }
+
+    StringData collectionName = collection->ns().coll();
+    if (collectionName == "system.namespaces") {
+        return BSONObj();
+    }
+
+    BSONObjBuilder b;
+    b.append("name", collectionName);
+
+    CollectionOptions options = collection->getCatalogEntry()->getCollectionOptions(txn);
+    b.append("options", options.toBSON());
+
+    return b.obj();
 }
 
 class CmdListCollections : public Command {
@@ -220,12 +238,29 @@ public:
             if (auto collNames = _getExactNameMatches(matcher.get())) {
                 for (auto&& collName : *collNames) {
                     auto nss = NamespaceString(db->name(), collName);
-                    _addWorkingSetMember(
-                        txn, db->getCollection(nss), matcher.get(), ws.get(), root.get());
+                    Collection* collection = db->getCollection(nss);
+                    BSONObj collBson = buildCollectionBson(txn, collection);
+                    if (!collBson.isEmpty()) {
+                        _addWorkingSetMember(txn, collBson, matcher.get(), ws.get(), root.get());
+                    }
                 }
             } else {
                 for (auto&& collection : *db) {
-                    _addWorkingSetMember(txn, collection, matcher.get(), ws.get(), root.get());
+                    BSONObj collBson = buildCollectionBson(txn, collection);
+                    if (!collBson.isEmpty()) {
+                        _addWorkingSetMember(txn, collBson, matcher.get(), ws.get(), root.get());
+                    }
+                }
+            }
+        }
+
+        ViewCatalog* viewCatalog = ViewCatalog::getInstance();
+
+        if (viewCatalog) {
+            for (auto&& view: *viewCatalog) {
+                BSONObj viewBson = buildViewBson(view);
+                if (!viewBson.isEmpty()) {
+                    _addWorkingSetMember(txn, viewBson, matcher.get(), ws.get(), root.get());
                 }
             }
         }

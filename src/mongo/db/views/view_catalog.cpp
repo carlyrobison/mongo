@@ -52,17 +52,7 @@ namespace mongo {
 
 namespace {
 ViewCatalog* viewCatalogSingleton = new ViewCatalog();
-
-BSONObj convertToAggregation(StringData backingNs, const BSONObj& pipeline) {
-    BSONObjBuilder builder;
-
-    invariant(!backingNs.empty() && !pipeline.isEmpty());
-    builder.append("aggregate", backingNs.toString());
-    builder.appendArray("pipeline", pipeline);
-
-    return builder.obj();
-}
-}
+} // namespace
 
 const std::uint32_t ViewCatalog::kMaxViewDepth = 20;
 
@@ -72,33 +62,43 @@ ViewCatalog* ViewCatalog::getInstance() {
 }
 
 Status ViewCatalog::createView(OperationContext* txn,
-                               StringData ns,
-                               StringData backingNs,
+                               std::string dbName,
+                               std::string viewName,
+                               std::string backingViewName,
                                BSONObj& pipeline) {
-    if (ViewCatalog::lookup(ns)) {
+    std::string ns = generateViewNamespace(dbName, viewName);
+    if (ViewCatalog::lookup(StringData(ns))) {
         LOG(3) << "VIEWS: Attempted to create a duplicate view";
         return Status(ErrorCodes::NamespaceExists, "Namespace already exists");
     }
 
-    _viewMap[ns.toString()] = stdx::make_unique<ViewDefinition>(ns, backingNs, pipeline);
+    _viewMap[ns] = new ViewDefinition(dbName, viewName, backingViewName, pipeline);
     return Status::OK();
 }
 
+std::string ViewCatalog::generateViewNamespace(StringData dbName, StringData viewName) {
+    return dbName.toString() + "." + viewName.toString();
+}
+
+
 ViewDefinition* ViewCatalog::lookup(StringData ns) {
-    auto result = _viewMap.find(ns.toString());
-    // log() << "Look up with namespace: " << ns;
-    if (result == _viewMap.end())
-        return nullptr;
-    else {
-        return (result->second).get();
+
+    ViewMap::const_iterator it = _viewMap.find(ns);
+    if (it != _viewMap.end() && it->second) {
+        return it->second;
     }
+    return nullptr;
+}
+
+ViewDefinition* ViewCatalog::lookup(StringData dbName, StringData viewName) {
+    return lookup(generateViewNamespace(dbName, viewName));
 }
 
 std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(OperationContext* txn,
                                                                        StringData ns) {
     LOG(3) << "VIEWS: attempting to resolve " << ns;
 
-    StringData backingNs = ns;
+    std::string backingNs = ns.toString();
     std::vector<BSONObj> newPipeline;
 
     for (auto i = ViewCatalog::kMaxViewDepth; i > 0; i--) {
@@ -106,11 +106,10 @@ std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(Operation
         LOG(3) << "VIEWS: resolution attempt #" << numberOfAttempts;
         ViewDefinition* view = lookup(backingNs);
         if (!view) {
-            std::string backingNsString = backingNs.toString();
-            return std::tie(backingNsString, newPipeline);
+            return std::tie(backingNs, newPipeline);
         }
         // log() << "Resolving view: " << view->toString();
-        backingNs = view->backingNs();
+        backingNs = view->fullBackingViewNs();
 
         std::vector<BSONObj> oldPipeline = view->pipeline();
         newPipeline.insert(newPipeline.end(), oldPipeline.begin(), oldPipeline.end());

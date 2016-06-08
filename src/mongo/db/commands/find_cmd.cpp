@@ -309,6 +309,16 @@ public:
                                         str::stream() << "Invalid collection name: " << nss.ns()});
         }
 
+        // Check if this query is being performed on a view.
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+            BSONObj match = convertToAggregate(cmdObj, false);
+            if (!match.isEmpty()) {
+                Command* c = Command::findCommand("aggregate");
+                bool retval = c->run(txn, dbname, match, options, errmsg, result);
+                return retval;
+            }
+        }
+
         // Although it is a command, a find command gets counted as a query.
         globalOpCounters.gotQuery();
 
@@ -353,17 +363,6 @@ public:
             return appendCommandStatus(result, statusWithCQ.getStatus());
         }
         std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
-
-        // Check if this query is being performed on a view.
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            log() << "Look up on a view";
-            BSONObj match = convertToAggregate(cmdObj, false);
-            if (!match.isEmpty()) {
-                Command* c = Command::findCommand("aggregate");
-                bool retval = c->run(txn, dbname, match, options, errmsg, result);
-                return retval;
-            }
-        }
 
         // Acquire locks.
         boost::optional<AutoGetCollectionForRead> ctx;
