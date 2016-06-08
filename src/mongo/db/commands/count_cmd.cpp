@@ -172,6 +172,9 @@ public:
                 if (retVal) {
                     return Status::OK();
                 }
+            } else {
+                return {ErrorCodes::OptionNotSupportedOnView,
+                        str::stream() << "One or more options not supported on view."};
             }
         }
 
@@ -220,6 +223,10 @@ public:
                 Command *c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, agg, options, errmsg, result);
                 return retval;
+            } else {
+                return appendCommandStatus(result,
+                                       {ErrorCodes::OptionNotSupportedOnView,
+                                        str::stream() << "One or more option not supported on views."});
             }
         }
 

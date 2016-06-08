@@ -224,8 +224,8 @@ public:
             std::vector<BSONObj> viewPipeline = std::get<1>(newAggregation);
             BSONObj viewCmd = ViewDefinition::getAggregateCommand(rootNs, cmdObj, viewPipeline);
 
-            log() << "Final cmd: " << viewCmd.jsonString();
-            log() << "Final ns: " << rootNs;
+            // log() << "Final cmd: " << viewCmd.jsonString();
+            // log() << "Final ns: " << rootNs;
 
             return this->run(txn, db, viewCmd, options, errmsg, result);
         }

@@ -71,8 +71,9 @@ bool isValidQuery(const BSONObj& o) {
             }
         } else {
             StringData fieldName = e.fieldNameStringData();
-            if (fieldName == "$where" || fieldName == "$elemMatch" || fieldName == "geo" ||
-                fieldName == "loc") {
+            if (fieldName == "$where" || fieldName == "$elemMatch" || fieldName == "$near" ||
+                fieldName == "$geoWithin" || fieldName == "$geoIntersects" || 
+                fieldName == "$nearSphere") {
                 return false;
             }
         }
@@ -239,6 +240,23 @@ public:
                     str::stream() << "Invalid collection name: " << nss.ns()};
         }
 
+        /* Check if this is running on a view */
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+            BSONObj explainCmd = convertToAggregate(cmdObj, true);
+            if (!explainCmd.isEmpty()) {
+                Command* c = Command::findCommand("aggregate");
+                std::string errMsg;
+                bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
+                if (retVal) {
+                    return Status::OK();
+                }
+            }
+            else {
+                return {ErrorCodes::OptionNotSupportedOnView,
+                        str::stream() << "One or more options not supported on view."};
+            }
+        }
+
         // Parse the command BSON to a LiteParsedQuery.
         const bool isExplain = true;
         auto lpqStatus = LiteParsedQuery::makeFromFindCommand(nss, cmdObj, isExplain);
@@ -260,19 +278,6 @@ public:
         // The collection may be NULL. If so, getExecutor() should handle it by returning
         // an execution tree with an EOFStage.
         Collection* collection = ctx.getCollection();
-
-        /* Check if this is running on a view */
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            BSONObj explainCmd = convertToAggregate(cmdObj, true);
-            if (!explainCmd.isEmpty()) {
-                Command* c = Command::findCommand("aggregate");
-                std::string errMsg;
-                bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
-                if (retVal) {
-                    return Status::OK();
-                }
-            }
-        }
 
         // We have a parsed query. Time to get the execution plan for it.
         auto statusWithPlanExecutor =
@@ -316,6 +321,10 @@ public:
                 Command* c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, match, options, errmsg, result);
                 return retval;
+            } else {
+                return appendCommandStatus(result,
+                                       {ErrorCodes::OptionNotSupportedOnView,
+                                        str::stream() << "One or more option not supported on views."});
             }
         }
 

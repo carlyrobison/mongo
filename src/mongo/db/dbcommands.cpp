@@ -90,6 +90,7 @@
 #include "mongo/db/s/sharding_state.h"
 #include "mongo/db/server_parameters.h"
 #include "mongo/db/write_concern.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/rpc/request_interface.h"
 #include "mongo/rpc/reply_builder_interface.h"
 #include "mongo/rpc/metadata.h"
@@ -1534,6 +1535,21 @@ bool Command::run(OperationContext* txn,
 
     // run expects const db std::string (can't bind to temporary)
     const std::string db = request.getDatabase().toString();
+
+    const NamespaceString nss(parseNs(db, cmd));
+
+    if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+        if (cmd.hasField("insert") || cmd.hasField("update") || 
+            cmd.hasField("delete") || cmd.hasField("findAndModify")) {
+            auto result = appendCommandStatus(
+                inPlaceReplyBob,
+                {ErrorCodes::CommandNotSupportedOnView,
+                 str::stream() << "Command not supported on views."});
+            inPlaceReplyBob.doneFast();
+            replyBuilder->setMetadata(rpc::makeEmptyMetadata());
+            return result;
+        }
+    }
 
     StatusWith<WriteConcernOptions> wcResult =
         extractWriteConcern(txn, cmd, db, this->supportsWriteConcern(cmd));
