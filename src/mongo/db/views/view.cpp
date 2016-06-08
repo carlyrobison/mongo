@@ -49,7 +49,6 @@ ViewDefinition::ViewDefinition(std::string dbName, std::string viewName, std::st
     _dbName = dbName;
     _viewName = viewName;
     _backingViewName = backingViewName;
-    log() << "CREATING: " << dbName << " " << viewName << " " << backingViewName;
     for (BSONElement e : pipeline) {
         BSONObj value = e.Obj();
         _pipeline.push_back(value.copy());

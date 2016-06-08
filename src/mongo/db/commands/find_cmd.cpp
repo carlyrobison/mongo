@@ -99,9 +99,9 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     if (cmd.hasField("filter")) {
         BSONObj value = cmd.getObjectField("filter");
         // We do not support these operators
-        if (!isValidQuery(cmd)) {
-            return BSONObj();
-        }
+        // if (!isValidQuery(cmd)) {
+        //     return BSONObj();
+        // }
         pipeline.push_back(BSON("$match" << value));
     }
     if (cmd.hasField("sort")) {
