@@ -652,7 +652,7 @@ Status userCreateNS(OperationContext* txn,
 
         // ns is fully-qualified already, but viewNs is not. Append the database name.
         std::string fullViewNs(db->name() + "." + viewNs);
-        
+
         LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
                << fullViewNs << " with pipeline " << collectionOptions.pipeline;
         return ViewCatalog::getInstance()->createView(

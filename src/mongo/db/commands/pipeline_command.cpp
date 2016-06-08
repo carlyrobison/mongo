@@ -251,7 +251,8 @@ public:
         unique_ptr<PlanExecutor> exec;
         {
             // If the collection can't be found, attempt to resolve the namespace as a view.
-            // auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, nss.ns(), pPipeline);
+            // auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, nss.ns(),
+            // pPipeline);
 
             // This is our final pipeline: a modified one for a view, or the original if it's not a
             // view.

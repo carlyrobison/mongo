@@ -45,24 +45,24 @@
 
 namespace mongo {
 
-ViewDefinition::ViewDefinition(StringData ns,
-                               StringData backingNs,
-                               BSONObj& pipeline) {
+ViewDefinition::ViewDefinition(StringData ns, StringData backingNs, BSONObj& pipeline) {
     _ns = ns.toString();
     _backingNs = backingNs.toString();
-    for (BSONElement e: pipeline) {
+    for (BSONElement e : pipeline) {
         BSONObj value = e.Obj();
         _pipeline.push_back(value.copy());
     }
 }
 
-BSONObj ViewDefinition::getAggregateCommand(std::string rootNs, BSONObj& cmd, std::vector<BSONObj> pipeline) {
+BSONObj ViewDefinition::getAggregateCommand(std::string rootNs,
+                                            BSONObj& cmd,
+                                            std::vector<BSONObj> pipeline) {
     BSONObjBuilder b;
-    for (BSONElement e: cmd) {
+    for (BSONElement e : cmd) {
         StringData fieldName = e.fieldNameStringData();
         if (fieldName == "pipeline") {
             BSONObj p = e.embeddedObject();
-            for (BSONElement el: p) {
+            for (BSONElement el : p) {
                 pipeline.push_back(el.Obj());
             }
             b.append("pipeline", pipeline);

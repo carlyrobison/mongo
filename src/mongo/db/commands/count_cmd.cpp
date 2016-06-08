@@ -53,7 +53,7 @@ using std::stringstream;
 
 bool isValidQuery(const BSONObj& o) {
     // log() << "Query: " << o.jsonString();
-    for (BSONElement e: o) {
+    for (BSONElement e : o) {
         // log() << "Element: " << e;
         if (e.type() == Object || e.type() == Array) {
             if (!isValidQuery(e.Obj())) {
@@ -61,8 +61,8 @@ bool isValidQuery(const BSONObj& o) {
             }
         } else {
             StringData fieldName = e.fieldNameStringData();
-            if (fieldName == "$where" || fieldName == "$elemMatch" || 
-                fieldName == "geo" || fieldName == "loc") {
+            if (fieldName == "$where" || fieldName == "$elemMatch" || fieldName == "geo" ||
+                fieldName == "loc") {
                 return false;
             }
         }
@@ -76,14 +76,14 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     std::vector<BSONObj> pipeline;
 
     // Do not support single batch
-    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || 
-        cmd.hasField("maxScan") || cmd.hasField("max") || cmd.hasField("min") ||
-        cmd.hasField("returnKey") || cmd.hasField("tailable") || cmd.hasField("showRecordId") ||
-        cmd.hasField("snapshot") || cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
+    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || cmd.hasField("maxScan") ||
+        cmd.hasField("max") || cmd.hasField("min") || cmd.hasField("returnKey") ||
+        cmd.hasField("tailable") || cmd.hasField("showRecordId") || cmd.hasField("snapshot") ||
+        cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
         cmd.hasField("awaitData") || cmd.hasField("allowPartialResults")) {
         return BSONObj();
     }
-    
+
     // Build the pipeline
     if (cmd.hasField("query")) {
         BSONObj value = cmd.getObjectField("query");
@@ -97,7 +97,8 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     }
     if (cmd.hasField("limit")) {
         int value = cmd.getIntField("limit");
-        if (value < 0) value = -value;
+        if (value < 0)
+            value = -value;
         pipeline.push_back(BSON("$limit" << value));
     }
 
@@ -196,7 +197,7 @@ public:
 
         log() << cmdObj.jsonString();
 
-        const NamespaceString nss(parseNs(dbname, cmdObj)); 
+        const NamespaceString nss(parseNs(dbname, cmdObj));
 
         // Are we counting on a view?
         // if (ViewCatalog::getInstance()->lookup(nss.ns())) {
@@ -219,7 +220,7 @@ public:
             BSONObj agg = convertToAggregate(cmdObj, false);
             if (!agg.isEmpty()) {
                 ctx = boost::none;
-                Command *c = Command::findCommand("aggregate");
+                Command* c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, agg, options, errmsg, result);
                 return retval;
             }

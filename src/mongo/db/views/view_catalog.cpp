@@ -75,7 +75,6 @@ Status ViewCatalog::createView(OperationContext* txn,
                                StringData ns,
                                StringData backingNs,
                                BSONObj& pipeline) {
-
     if (ViewCatalog::lookup(ns)) {
         LOG(3) << "VIEWS: Attempted to create a duplicate view";
         return Status(ErrorCodes::NamespaceExists, "Namespace already exists");
@@ -95,8 +94,8 @@ ViewDefinition* ViewCatalog::lookup(StringData ns) {
     }
 }
 
-std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(
-    OperationContext* txn, StringData ns) {
+std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(OperationContext* txn,
+                                                                       StringData ns) {
     LOG(3) << "VIEWS: attempting to resolve " << ns;
 
     StringData backingNs = ns;

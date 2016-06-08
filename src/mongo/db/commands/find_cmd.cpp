@@ -63,7 +63,7 @@ const char kTermField[] = "term";
 
 bool isValidQuery(const BSONObj& o) {
     // log() << "Query: " << o.jsonString();
-    for (BSONElement e: o) {
+    for (BSONElement e : o) {
         // log() << "Element: " << e;
         if (e.type() == Object || e.type() == Array) {
             if (!isValidQuery(e.Obj())) {
@@ -71,8 +71,8 @@ bool isValidQuery(const BSONObj& o) {
             }
         } else {
             StringData fieldName = e.fieldNameStringData();
-            if (fieldName == "$where" || fieldName == "$elemMatch" || 
-                fieldName == "geo" || fieldName == "loc") {
+            if (fieldName == "$where" || fieldName == "$elemMatch" || fieldName == "geo" ||
+                fieldName == "loc") {
                 return false;
             }
         }
@@ -86,10 +86,10 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     std::vector<BSONObj> pipeline;
 
     // Options that we do not support
-    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") ||
-        cmd.hasField("maxScan") || cmd.hasField("max") || cmd.hasField("min") ||
-        cmd.hasField("returnKey") || cmd.hasField("tailable") || cmd.hasField("showRecordId") ||
-        cmd.hasField("snapshot") || cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
+    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || cmd.hasField("maxScan") ||
+        cmd.hasField("max") || cmd.hasField("min") || cmd.hasField("returnKey") ||
+        cmd.hasField("tailable") || cmd.hasField("showRecordId") || cmd.hasField("snapshot") ||
+        cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
         cmd.hasField("awaitData") || cmd.hasField("allowPartialResults")) {
         return BSONObj();
     }
@@ -121,8 +121,8 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
         BSONObj value = cmd.getObjectField("projection");
         if (!value.isEmpty()) {
             bool hasOutputField = false;
-            for (BSONElement e: value) {
-                const char * fieldName = e.fieldName();
+            for (BSONElement e : value) {
+                const char* fieldName = e.fieldName();
                 if (StringData(fieldName) != "_id" && e.numberInt() == 1) {
                     hasOutputField = true;
                     break;
@@ -133,9 +133,9 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
             }
             pipeline.push_back(BSON("$project" << value));
         }
-        for (BSONElement e: value) {
+        for (BSONElement e : value) {
             // Only support simple 0 or 1 projection
-            const char * fieldName = e.fieldName();
+            const char* fieldName = e.fieldName();
             if (fieldName[e.fieldNameSize() - 2] == '$') {
                 return BSONObj();
             }
@@ -150,8 +150,7 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
 
     if (cmd.hasField("batchSize")) {
         b.append("cursor", BSON("batchSize" << cmd.getIntField("batchSize")));
-    }
-    else {
+    } else {
         b.append("cursor", BSONObj());
     }
     if (hasExplain) {
@@ -266,7 +265,7 @@ public:
         if (ViewCatalog::getInstance()->lookup(nss.ns())) {
             BSONObj explainCmd = convertToAggregate(cmdObj, true);
             if (!explainCmd.isEmpty()) {
-                Command *c = Command::findCommand("aggregate");
+                Command* c = Command::findCommand("aggregate");
                 std::string errMsg;
                 bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
                 if (retVal) {
@@ -360,7 +359,7 @@ public:
             log() << "Look up on a view";
             BSONObj match = convertToAggregate(cmdObj, false);
             if (!match.isEmpty()) {
-                Command *c = Command::findCommand("aggregate");
+                Command* c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, match, options, errmsg, result);
                 return retval;
             }

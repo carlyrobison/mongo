@@ -83,8 +83,7 @@ public:
     // std::tuple<std::string, boost::intrusive_ptr<Pipeline>> resolveView(
     //     OperationContext* txn, StringData ns, boost::intrusive_ptr<Pipeline> pipeline);
 
-    std::tuple<std::string, std::vector<BSONObj>> resolveView(
-        OperationContext* txn, StringData ns);
+    std::tuple<std::string, std::vector<BSONObj>> resolveView(OperationContext* txn, StringData ns);
 
 private:
     ViewMap _viewMap;

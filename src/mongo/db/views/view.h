@@ -47,7 +47,6 @@ class BSONObj;
 // Represents a "view"; that is, a visible subset of a collection or another view.
 class ViewDefinition {
 public:
-
     ViewDefinition(StringData ns, StringData backingNs, BSONObj& pipeline);
 
     StringData ns() const {
@@ -62,11 +61,13 @@ public:
         return _pipeline;
     }
 
-    static BSONObj getAggregateCommand(std::string rootNs, BSONObj& cmd, std::vector<BSONObj> pipeline);
+    static BSONObj getAggregateCommand(std::string rootNs,
+                                       BSONObj& cmd,
+                                       std::vector<BSONObj> pipeline);
 
     std::string toString() {
         std::string s;
-        for (auto& item: _pipeline) {
+        for (auto& item : _pipeline) {
             s += item.jsonString();
         }
         return _ns + "    " + _backingNs + "   " + s;

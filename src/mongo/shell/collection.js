@@ -1798,7 +1798,7 @@ DBCollection.prototype.distinct = function(keyString, query, options) {
     }
 
     var ret = (res.result) ? res.result[0][keyString] : res.values;
-    
+
     return ret;
 };
 
