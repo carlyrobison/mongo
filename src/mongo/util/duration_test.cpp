@@ -25,9 +25,11 @@
  *    then also delete it in the license file.
  */
 
+#include "mongo/platform/basic.h"
+
 #include "mongo/stdx/chrono.h"
-#include "mongo/util/duration.h"
 #include "mongo/unittest/unittest.h"
+#include "mongo/util/duration.h"
 
 namespace mongo {
 namespace {

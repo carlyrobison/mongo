@@ -37,25 +37,26 @@
 #include "mongo/db/catalog/database.h"
 #include "mongo/db/catalog/document_validation.h"
 #include "mongo/db/concurrency/write_conflict_exception.h"
+#include "mongo/db/db_raii.h"
+#include "mongo/db/dbdirectclient.h"
 #include "mongo/db/exec/fetch.h"
 #include "mongo/db/exec/index_iterator.h"
 #include "mongo/db/exec/multi_iterator.h"
 #include "mongo/db/exec/shard_filter.h"
 #include "mongo/db/exec/working_set.h"
-#include "mongo/db/db_raii.h"
-#include "mongo/db/dbdirectclient.h"
 #include "mongo/db/index/index_access_method.h"
 #include "mongo/db/matcher/extensions_callback_real.h"
 #include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/pipeline.h"
 #include "mongo/db/query/collation/collation_serializer.h"
 #include "mongo/db/query/get_executor.h"
+#include "mongo/db/query/plan_summary_stats.h"
 #include "mongo/db/query/query_planner.h"
+#include "mongo/db/s/sharded_connection_info.h"
+#include "mongo/db/s/sharding_state.h"
 #include "mongo/db/service_context.h"
 #include "mongo/db/storage/record_store.h"
 #include "mongo/db/storage/sorted_data_interface.h"
-#include "mongo/db/s/sharded_connection_info.h"
-#include "mongo/db/s/sharding_state.h"
 #include "mongo/s/chunk_version.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/log.h"
@@ -84,9 +85,8 @@ public:
 
     bool isSharded(const NamespaceString& ns) final {
         const ChunkVersion unsharded(0, 0, OID());
-        return !(ShardingState::get(_ctx->opCtx)
-                     ->getVersion(ns.ns())
-                     .isWriteCompatibleWith(unsharded));
+        return !(
+            ShardingState::get(_ctx->opCtx)->getVersion(ns.ns()).isWriteCompatibleWith(unsharded));
     }
 
     bool isCapped(const NamespaceString& ns) final {
@@ -188,9 +188,12 @@ shared_ptr<PlanExecutor> createRandomCursorExecutor(Collection* collection,
     ShardingState* const shardingState = ShardingState::get(txn);
 
     // If we're in a sharded environment, we need to filter out documents we don't own.
-    if (shardingState->needCollectionMetadata(txn, txn->getNS())) {
+    if (shardingState->needCollectionMetadata(txn, collection->ns().ns())) {
         auto shardFilterStage = stdx::make_unique<ShardFilterStage>(
-            txn, shardingState->getCollectionMetadata(txn->getNS()), ws.get(), stage.release());
+            txn,
+            shardingState->getCollectionMetadata(collection->ns().ns()),
+            ws.get(),
+            stage.release());
         return uassertStatusOK(PlanExecutor::make(
             txn, std::move(ws), std::move(shardFilterStage), collection, PlanExecutor::YIELD_AUTO));
     }
@@ -207,17 +210,17 @@ StatusWith<std::unique_ptr<PlanExecutor>> attemptToGetExecutor(
     BSONObj projectionObj,
     BSONObj sortObj,
     const size_t plannerOpts) {
-    auto lpq = stdx::make_unique<LiteParsedQuery>(pExpCtx->ns);
-    lpq->setFilter(queryObj);
-    lpq->setProj(projectionObj);
-    lpq->setSort(sortObj);
+    auto qr = stdx::make_unique<QueryRequest>(pExpCtx->ns);
+    qr->setFilter(queryObj);
+    qr->setProj(projectionObj);
+    qr->setSort(sortObj);
     if (pExpCtx->collator) {
-        lpq->setCollation(CollationSerializer::specToBSON(pExpCtx->collator->getSpec()));
+        qr->setCollation(CollationSerializer::specToBSON(pExpCtx->collator->getSpec()));
     }
 
     const ExtensionsCallbackReal extensionsCallback(pExpCtx->opCtx, &pExpCtx->ns);
 
-    auto cq = CanonicalQuery::canonicalize(txn, std::move(lpq), extensionsCallback);
+    auto cq = CanonicalQuery::canonicalize(txn, std::move(qr), extensionsCallback);
 
     if (!cq.isOK()) {
         // Return an error instead of uasserting, since there are cases where the combination of
@@ -483,6 +486,35 @@ shared_ptr<PlanExecutor> PipelineD::addCursorSource(const intrusive_ptr<Pipeline
     exec->saveState();
 
     return exec;
+}
+
+std::string PipelineD::getPlanSummaryStr(const boost::intrusive_ptr<Pipeline>& pPipeline) {
+    if (auto docSourceCursor =
+            dynamic_cast<DocumentSourceCursor*>(pPipeline->sources.front().get())) {
+        return docSourceCursor->getPlanSummaryStr();
+    }
+
+    return "";
+}
+
+void PipelineD::getPlanSummaryStats(const boost::intrusive_ptr<Pipeline>& pPipeline,
+                                    PlanSummaryStats* statsOut) {
+    invariant(statsOut);
+
+    if (auto docSourceCursor =
+            dynamic_cast<DocumentSourceCursor*>(pPipeline->sources.front().get())) {
+        *statsOut = docSourceCursor->getPlanSummaryStats();
+    }
+
+    bool hasSortStage{false};
+    for (auto&& source : pPipeline->sources) {
+        if (dynamic_cast<DocumentSourceSort*>(source.get())) {
+            hasSortStage = true;
+            break;
+        }
+    }
+
+    statsOut->hasSortStage = hasSortStage;
 }
 
 }  // namespace mongo

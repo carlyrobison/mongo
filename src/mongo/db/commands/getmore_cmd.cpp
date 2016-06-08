@@ -49,8 +49,8 @@
 #include "mongo/db/query/find_common.h"
 #include "mongo/db/query/getmore_request.h"
 #include "mongo/db/query/plan_summary_stats.h"
-#include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/repl/oplog.h"
+#include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/s/operation_sharding_state.h"
 #include "mongo/db/service_context.h"
 #include "mongo/db/stats/counters.h"
@@ -137,8 +137,8 @@ public:
         }
         const GetMoreRequest& request = parseStatus.getValue();
 
-        return AuthorizationSession::get(client)
-            ->checkAuthForGetMore(request.nss, request.cursorid, request.term.is_initialized());
+        return AuthorizationSession::get(client)->checkAuthForGetMore(
+            request.nss, request.cursorid, request.term.is_initialized());
     }
 
     bool run(OperationContext* txn,
@@ -307,9 +307,17 @@ public:
         exec->reattachToOperationContext(txn);
         exec->restoreState();
 
+        auto planSummary = Explain::getPlanSummary(exec);
         {
             stdx::lock_guard<Client>(*txn->getClient());
-            curOp->setPlanSummary_inlock(Explain::getPlanSummary(exec));
+            curOp->setPlanSummary_inlock(planSummary);
+
+            // Ensure that the original query or command object is available in the slow query log,
+            // profiler and currentOp.
+            auto originatingCommand = cursor->getQuery();
+            if (!originatingCommand.isEmpty()) {
+                curOp->setOriginatingCommand_inlock(originatingCommand);
+            }
         }
 
         uint64_t notifierVersion = 0;
@@ -389,7 +397,11 @@ public:
         postExecutionStats.totalDocsExamined -= preExecutionStats.totalDocsExamined;
         curOp->debug().setPlanSummaryMetrics(postExecutionStats);
 
-        if (curOp->shouldDBProfile(curOp->elapsedMillis())) {
+        // We do not report 'execStats' for aggregation, both in the original request and
+        // subsequent getMore. The reason for this is that aggregation's source PlanExecutor
+        // could be destroyed before we know whether we need execStats and we do not want to
+        // generate for all operations due to cost.
+        if (!cursor->isAggCursor() && curOp->shouldDBProfile(curOp->elapsedMillis())) {
             BSONObjBuilder execStatsBob;
             Explain::getWinningPlanStats(exec, &execStatsBob);
             curOp->debug().execStats = execStatsBob.obj();

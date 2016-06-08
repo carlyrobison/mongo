@@ -427,11 +427,11 @@ Status ChunkManager::createFirstChunks(OperationContext* txn,
         chunk.setShard(shardIds[i % shardIds.size()]);
         chunk.setVersion(version);
 
-        Status status = grid.catalogManager(txn)
-                            ->insertConfigDocument(txn, ChunkType::ConfigNS, chunk.toBSON());
+        Status status = grid.catalogManager(txn)->insertConfigDocument(
+            txn, ChunkType::ConfigNS, chunk.toBSON());
         if (!status.isOK()) {
-            const string errMsg = str::stream()
-                << "Creating first chunks failed: " << status.reason();
+            const string errMsg = str::stream() << "Creating first chunks failed: "
+                                                << status.reason();
             error() << errMsg;
             return Status(status.code(), errMsg);
         }
@@ -472,18 +472,21 @@ shared_ptr<Chunk> ChunkManager::findIntersectingChunk(OperationContext* txn,
     }
 
     msgasserted(8070,
-                str::stream() << "couldn't find a chunk intersecting: " << shardKey
-                              << " for ns: " << _ns << " at version: " << _version.toString()
-                              << ", number of chunks: " << _chunkMap.size());
+                str::stream() << "couldn't find a chunk intersecting: " << shardKey << " for ns: "
+                              << _ns
+                              << " at version: "
+                              << _version.toString()
+                              << ", number of chunks: "
+                              << _chunkMap.size());
 }
 
 void ChunkManager::getShardIdsForQuery(OperationContext* txn,
                                        const BSONObj& query,
                                        set<ShardId>* shardIds) const {
-    auto lpq = stdx::make_unique<LiteParsedQuery>(NamespaceString(_ns));
-    lpq->setFilter(query);
+    auto qr = stdx::make_unique<QueryRequest>(NamespaceString(_ns));
+    qr->setFilter(query);
 
-    auto statusWithCQ = CanonicalQuery::canonicalize(txn, std::move(lpq), ExtensionsCallbackNoop());
+    auto statusWithCQ = CanonicalQuery::canonicalize(txn, std::move(qr), ExtensionsCallbackNoop());
 
     uassertStatusOK(statusWithCQ.getStatus());
     unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
@@ -565,8 +568,9 @@ void ChunkManager::getAllShardIds(set<ShardId>* all) const {
 
 IndexBounds ChunkManager::getIndexBoundsForQuery(const BSONObj& key,
                                                  const CanonicalQuery& canonicalQuery) {
-    // TODO: special-casing TEXT here is no longer necessary.  The work to remove this special case
-    // is being tracked at SERVER-21511.
+    // $text is not allowed in planning since we don't have text index on mongos.
+    // TODO: Treat $text query as a no-op in planning on mongos. So with shard key {a: 1},
+    //       the query { a: 2, $text: { ... } } will only target to {a: 2}.
     if (QueryPlannerCommon::hasNode(canonicalQuery.root(), MatchExpression::TEXT)) {
         IndexBounds bounds;
         IndexBoundsBuilder::allValuesBounds(key, &bounds);  // [minKey, maxKey]
@@ -714,12 +718,10 @@ ChunkManager::ChunkRangeMap ChunkManager::_constructRanges(const ChunkMap& chunk
 
     while (current != chunkMap.cend()) {
         const auto rangeFirst = current;
-        current = std::find_if(current,
-                               chunkMap.cend(),
-                               [&rangeFirst](const ChunkMap::value_type& chunkMapEntry) {
-                                   return chunkMapEntry.second->getShardId() !=
-                                       rangeFirst->second->getShardId();
-                               });
+        current = std::find_if(
+            current, chunkMap.cend(), [&rangeFirst](const ChunkMap::value_type& chunkMapEntry) {
+                return chunkMapEntry.second->getShardId() != rangeFirst->second->getShardId();
+            });
         const auto rangeLast = std::prev(current);
 
         const BSONObj rangeMin = rangeFirst->second->getMin();

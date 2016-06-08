@@ -177,6 +177,10 @@ public:
      */
     explicit Decimal128(std::string stringValue, RoundingMode roundMode = kRoundTiesToEven);
 
+    Decimal128(std::string stringValue,
+               std::uint32_t* signalingFlag,
+               RoundingMode roundMode = kRoundTiesToEven);
+
     /**
      * This function gets the inner Value struct storing a Decimal128 value.
      */
@@ -311,7 +315,7 @@ public:
     /**
      * This set of mathematical operation functions implement the corresponding
      * IEEE 754-2008 operations on self and other.
-     * The operations are commutative, so a.add(b) is equivalent to b.add(a).
+     * The 'add' and 'multiply' methods are commutative, so a.add(b) is equivalent to b.add(a).
      * Rounding of results that require a precision greater than 34 decimal digits
      * is performed using the supplied rounding mode (defaulting to kRoundTiesToEven).
      * NaNs and infinities are handled according to the IEEE 754-2008 specification.
@@ -338,6 +342,27 @@ public:
     Decimal128 divide(const Decimal128& other,
                       std::uint32_t* signalingFlags,
                       RoundingMode roundMode = kRoundTiesToEven) const;
+    Decimal128 exponential(RoundingMode roundMode = kRoundTiesToEven) const;
+    Decimal128 exponential(std::uint32_t* signalingFlags,
+                           RoundingMode roundMode = kRoundTiesToEven) const;
+    Decimal128 logarithm(RoundingMode roundMode = kRoundTiesToEven) const;
+    Decimal128 logarithm(std::uint32_t* signalingFlags,
+                         RoundingMode roundMode = kRoundTiesToEven) const;
+    Decimal128 logarithm(const Decimal128& other, RoundingMode roundMode = kRoundTiesToEven) const;
+    Decimal128 logarithm(const Decimal128& other,
+                         std::uint32_t* signalingFlags,
+                         RoundingMode roundMode = kRoundTiesToEven) const;
+    Decimal128 modulo(const Decimal128& other) const;
+    Decimal128 modulo(const Decimal128& other, std::uint32_t* signalingFlags) const;
+
+    Decimal128 power(const Decimal128& other, RoundingMode roundMode = kRoundTiesToEven) const;
+    Decimal128 power(const Decimal128& other,
+                     std::uint32_t* signalingFlags,
+                     RoundingMode roundMode = kRoundTiesToEven) const;
+
+    Decimal128 squareRoot(RoundingMode roundMode = kRoundTiesToEven) const;
+    Decimal128 squareRoot(std::uint32_t* signalingFlags,
+                          RoundingMode roundMode = kRoundTiesToEven) const;
 
     /**
      * This function quantizes the current decimal given a quantum reference
@@ -393,6 +418,9 @@ private:
     static const uint64_t kCombinationInfinity = 0x1e << 12;
     static const uint64_t kCombinationNaN = 0x1f << 12;
     static const uint64_t kCanonicalCoefficientHighFieldMask = (1ull << 49) - 1;
+
+    std::string _convertToScientificNotation(StringData coefficient, int adjustedExponent) const;
+    std::string _convertToStandardDecimalNotation(StringData coefficient, int exponent) const;
 
     uint64_t _getCombinationField() const {
         return (_value.high64 >> kCombinationFieldPos) & kCombinationFieldMask;

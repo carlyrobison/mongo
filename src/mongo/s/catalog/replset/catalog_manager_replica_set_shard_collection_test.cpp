@@ -42,7 +42,6 @@
 #include "mongo/executor/task_executor.h"
 #include "mongo/rpc/metadata/repl_set_metadata.h"
 #include "mongo/rpc/metadata/server_selection_metadata.h"
-#include "mongo/s/balancer/balancer_configuration.h"
 #include "mongo/s/catalog/dist_lock_manager_mock.h"
 #include "mongo/s/catalog/replset/catalog_manager_replica_set.h"
 #include "mongo/s/catalog/replset/catalog_manager_replica_set_test_fixture.h"
@@ -99,8 +98,7 @@ public:
             const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
             ASSERT_EQ(DatabaseType::ConfigNS, nss.ns());
 
-            auto query =
-                assertGet(LiteParsedQuery::makeFromFindCommand(nss, request.cmdObj, false));
+            auto query = assertGet(QueryRequest::makeFromFindCommand(nss, request.cmdObj, false));
 
             ASSERT_EQ(DatabaseType::ConfigNS, query->ns());
             ASSERT_EQ(BSON(DatabaseType::name(expectedDb.getName())), query->getFilter());
@@ -164,8 +162,7 @@ public:
             const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
             ASSERT_EQ(nss.ns(), ChunkType::ConfigNS);
 
-            auto query =
-                assertGet(LiteParsedQuery::makeFromFindCommand(nss, request.cmdObj, false));
+            auto query = assertGet(QueryRequest::makeFromFindCommand(nss, request.cmdObj, false));
             BSONObj expectedQuery =
                 BSON(ChunkType::ns(ns) << ChunkType::DEPRECATED_lastmod << GTE << Timestamp());
             BSONObj expectedSort = BSON(ChunkType::DEPRECATED_lastmod() << 1);
@@ -340,8 +337,11 @@ TEST_F(ShardCollectionTest, noInitialChunksOrData) {
     {
         BSONObj logChangeDetail =
             BSON("shardKey" << keyPattern.toBSON() << "collection" << ns << "primary"
-                            << shard.getName() + ":" + shard.getHost() << "initShards"
-                            << BSONArray() << "numChunks" << 1);
+                            << shard.getName() + ":" + shard.getHost()
+                            << "initShards"
+                            << BSONArray()
+                            << "numChunks"
+                            << 1);
         expectChangeLogCreate(configHost, BSON("ok" << 1));
         expectChangeLogInsert(
             configHost, network()->now(), "shardCollection.start", ns, logChangeDetail);
@@ -511,9 +511,11 @@ TEST_F(ShardCollectionTest, withInitialChunks) {
     {
         BSONObj logChangeDetail =
             BSON("shardKey" << keyPattern.toBSON() << "collection" << ns << "primary"
-                            << shard0.getName() + ":" + shard0.getHost() << "initShards"
+                            << shard0.getName() + ":" + shard0.getHost()
+                            << "initShards"
                             << BSON_ARRAY(shard0.getName() << shard1.getName() << shard2.getName())
-                            << "numChunks" << (int)expectedChunks.size());
+                            << "numChunks"
+                            << (int)expectedChunks.size());
         expectChangeLogCreate(configHost, BSON("ok" << 1));
         expectChangeLogInsert(
             configHost, network()->now(), "shardCollection.start", ns, logChangeDetail);
@@ -655,8 +657,11 @@ TEST_F(ShardCollectionTest, withInitialData) {
     {
         BSONObj logChangeDetail =
             BSON("shardKey" << keyPattern.toBSON() << "collection" << ns << "primary"
-                            << shard.getName() + ":" + shard.getHost() << "initShards"
-                            << BSONArray() << "numChunks" << 1);
+                            << shard.getName() + ":" + shard.getHost()
+                            << "initShards"
+                            << BSONArray()
+                            << "numChunks"
+                            << 1);
         expectChangeLogCreate(configHost, BSON("ok" << 1));
         expectChangeLogInsert(
             configHost, network()->now(), "shardCollection.start", ns, logChangeDetail);
@@ -676,7 +681,7 @@ TEST_F(ShardCollectionTest, withInitialData) {
         ASSERT_EQUALS(keyPattern.toBSON(), request.cmdObj["keyPattern"].Obj());
         ASSERT_EQUALS(keyPattern.getKeyPattern().globalMin(), request.cmdObj["min"].Obj());
         ASSERT_EQUALS(keyPattern.getKeyPattern().globalMax(), request.cmdObj["max"].Obj());
-        ASSERT_EQUALS(ChunkSizeSettingsType::kDefaultMaxChunkSizeBytes,
+        ASSERT_EQUALS(64 * 1024 * 1024ULL,
                       static_cast<uint64_t>(request.cmdObj["maxChunkSizeBytes"].numberLong()));
         ASSERT_EQUALS(0, request.cmdObj["maxSplitPoints"].numberLong());
         ASSERT_EQUALS(0, request.cmdObj["maxChunkObjects"].numberLong());

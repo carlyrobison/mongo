@@ -195,10 +195,10 @@ int64_t ValueWriter::toInt64() {
 }
 
 Decimal128 ValueWriter::toDecimal128() {
+    std::uint32_t signalingFlags = 0;
     if (_value.isNumber()) {
         return Decimal128(toNumber(), Decimal128::kRoundTo15Digits);
     }
-
     if (getScope(_context)->getProto<NumberIntInfo>().instanceOf(_value))
         return Decimal128(NumberIntInfo::ToNumberInt(_context, _value));
 
@@ -209,9 +209,23 @@ Decimal128 ValueWriter::toDecimal128() {
         return NumberDecimalInfo::ToNumberDecimal(_context, _value);
 
     if (_value.isString()) {
-        return Decimal128(toString());
-    }
+        std::string input = toString();
+        Decimal128 decimal = Decimal128(input, &signalingFlags);
+        uassert(ErrorCodes::BadValue,
+                str::stream() << "Input is not a valid Decimal128 value.",
+                !Decimal128::hasFlag(signalingFlags, Decimal128::SignalingFlag::kInvalid));
+        uassert(ErrorCodes::BadValue,
+                str::stream() << "Input out of range of Decimal128 value (inexact).",
+                !Decimal128::hasFlag(signalingFlags, Decimal128::SignalingFlag::kInexact));
+        uassert(ErrorCodes::BadValue,
+                str::stream() << "Input out of range of Decimal128 value (underflow).",
+                !Decimal128::hasFlag(signalingFlags, Decimal128::SignalingFlag::kUnderflow));
+        uassert(ErrorCodes::BadValue,
+                str::stream() << "Input out of range of Decimal128 value (overflow).",
+                !Decimal128::hasFlag(signalingFlags, Decimal128::SignalingFlag::kOverflow));
 
+        return decimal;
+    }
     uasserted(ErrorCodes::BadValue, str::stream() << "Unable to write Decimal128 value.");
 }
 

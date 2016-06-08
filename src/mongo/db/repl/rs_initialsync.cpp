@@ -40,10 +40,9 @@
 #include "mongo/db/catalog/document_validation.h"
 #include "mongo/db/client.h"
 #include "mongo/db/cloner.h"
-#include "mongo/db/db_raii.h"
 #include "mongo/db/concurrency/write_conflict_exception.h"
+#include "mongo/db/db_raii.h"
 #include "mongo/db/dbhelpers.h"
-#include "mongo/db/service_context.h"
 #include "mongo/db/op_observer.h"
 #include "mongo/db/repl/bgsync.h"
 #include "mongo/db/repl/initial_sync.h"
@@ -52,6 +51,7 @@
 #include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/repl/storage_interface.h"
+#include "mongo/db/service_context.h"
 #include "mongo/util/exit.h"
 #include "mongo/util/fail_point_service.h"
 #include "mongo/util/log.h"
@@ -143,7 +143,8 @@ void checkAdminDatabasePostClone(OperationContext* txn, Database* adminDb) {
                  << " but could not find an auth schema version document in "
                  << AuthorizationManager::versionCollectionNamespace;
         severe() << "This indicates that the primary of this replica set was not successfully "
-                    "upgraded to schema version " << AuthorizationManager::schemaVersion26Final
+                    "upgraded to schema version "
+                 << AuthorizationManager::schemaVersion26Final
                  << ", which is the minimum supported schema version in this version of MongoDB";
         fassertFailedNoTrace(28620);
     }
@@ -213,14 +214,17 @@ bool _initialSyncClone(OperationContext* txn,
  * @param r      the oplog reader.
  * @return if applying the oplog succeeded.
  */
-bool _initialSyncApplyOplog(OperationContext* ctx, repl::InitialSync* syncer, OplogReader* r) {
+bool _initialSyncApplyOplog(OperationContext* ctx,
+                            repl::InitialSync* syncer,
+                            OplogReader* r,
+                            BackgroundSync* bgsync) {
     const OpTime startOpTime = getGlobalReplicationCoordinator()->getMyLastAppliedOpTime();
     BSONObj lastOp;
 
     // If the fail point is set, exit failing.
     if (MONGO_FAIL_POINT(failInitSyncWithBufferedEntriesLeft)) {
         log() << "adding fake oplog entry to buffer.";
-        BackgroundSync::get()->pushTestOpToBuffer(BSON(
+        bgsync->pushTestOpToBuffer(BSON(
             "ts" << startOpTime.getTimestamp() << "t" << startOpTime.getTerm() << "v" << 1 << "op"
                  << "n"));
         return false;
@@ -306,10 +310,9 @@ const auto kConnectRetryLimit = 10;
  * ErrorCode::InitialSyncOplogSourceMissing if the node fails to find an sync source, Status::OK
  * if everything worked, and ErrorCode::InitialSyncFailure for all other error cases.
  */
-Status _initialSync() {
+Status _initialSync(BackgroundSync* bgsync) {
     log() << "initial sync pending";
 
-    BackgroundSync* bgsync(BackgroundSync::get());
     const ServiceContext::UniqueOperationContext txnPtr = cc().makeOperationContext();
     OperationContext& txn = *txnPtr;
     txn.setReplicatedWrites(false);
@@ -416,14 +419,17 @@ Status _initialSync() {
     log() << "initial sync data copy, starting syncup";
 
     // prime oplog, but don't need to actually apply the op as the cloned data already reflects it.
-    OpTime lastOptime = writeOpsToOplog(&txn, {lastOp});
+    OplogEntry lastOplogEntry(lastOp);
+    OpTime lastOptime = fassertStatusOK(40142,
+                                        StorageInterface::get(&txn)->writeOpsToOplog(
+                                            &txn, NamespaceString(rsOplogName), {lastOplogEntry}));
     ReplClientInfo::forClient(txn.getClient()).setLastOp(lastOptime);
     replCoord->setMyLastAppliedOpTime(lastOptime);
     setNewTimestamp(lastOptime.getTimestamp());
 
     std::string msg = "oplog sync 1 of 3";
     log() << msg;
-    if (!_initialSyncApplyOplog(&txn, &init, &r)) {
+    if (!_initialSyncApplyOplog(&txn, &init, &r, bgsync)) {
         return Status(ErrorCodes::InitialSyncFailure,
                       str::stream() << "initial sync failed: " << msg);
     }
@@ -434,7 +440,7 @@ Status _initialSync() {
     // TODO: replace with "tail" instance below, since we don't need to retry/reclone missing docs.
     msg = "oplog sync 2 of 3";
     log() << msg;
-    if (!_initialSyncApplyOplog(&txn, &init, &r)) {
+    if (!_initialSyncApplyOplog(&txn, &init, &r, bgsync)) {
         return Status(ErrorCodes::InitialSyncFailure,
                       str::stream() << "initial sync failed: " << msg);
     }
@@ -461,7 +467,7 @@ Status _initialSync() {
     log() << msg;
 
     InitialSync tail(bgsync, multiSyncApply);  // Use the non-initial sync apply code
-    if (!_initialSyncApplyOplog(&txn, &tail, &r)) {
+    if (!_initialSyncApplyOplog(&txn, &tail, &r, bgsync)) {
         return Status(ErrorCodes::InitialSyncFailure,
                       str::stream() << "initial sync failed: " << msg);
     }
@@ -484,7 +490,7 @@ Status _initialSync() {
 
         // Initial sync is now complete.  Flag this by setting minValid to the last thing we synced.
         StorageInterface::get(&txn)->setMinValid(&txn, lastOpTimeWritten, DurableRequirement::None);
-        BackgroundSync::get()->setInitialSyncRequestedFlag(false);
+        getGlobalReplicationCoordinator()->setInitialSyncRequestedFlag(false);
     }
 
     // Clear the initial sync flag -- cannot be done under a db lock, or recursive.
@@ -504,7 +510,7 @@ const auto kMaxFailedAttempts = 10;
 const auto kInitialSyncRetrySleepDuration = Seconds{5};
 }  // namespace
 
-void syncDoInitialSync() {
+void syncDoInitialSync(BackgroundSync* bgsync) {
     stdx::unique_lock<stdx::mutex> lk(_initialSyncMutex, stdx::defer_lock);
     if (!lk.try_lock()) {
         uasserted(34474, "Initial Sync Already Active.");
@@ -520,7 +526,7 @@ void syncDoInitialSync() {
     while (failedAttempts < kMaxFailedAttempts) {
         try {
             // leave loop when successful
-            Status status = _initialSync();
+            Status status = _initialSync(bgsync);
             if (status.isOK()) {
                 break;
             } else {

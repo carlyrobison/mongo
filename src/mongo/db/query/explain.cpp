@@ -38,14 +38,15 @@
 #include "mongo/db/exec/index_scan.h"
 #include "mongo/db/exec/multi_plan.h"
 #include "mongo/db/exec/near.h"
+#include "mongo/db/exec/pipeline_proxy.h"
 #include "mongo/db/exec/text.h"
+#include "mongo/db/exec/working_set_common.h"
 #include "mongo/db/query/get_executor.h"
 #include "mongo/db/query/plan_executor.h"
 #include "mongo/db/query/plan_summary_stats.h"
 #include "mongo/db/query/query_planner.h"
 #include "mongo/db/query/query_settings.h"
 #include "mongo/db/query/stage_builder.h"
-#include "mongo/db/exec/working_set_common.h"
 #include "mongo/db/server_options.h"
 #include "mongo/db/server_parameters.h"
 #include "mongo/util/mongoutils/str.h"
@@ -766,6 +767,11 @@ std::string Explain::getPlanSummary(const PlanExecutor* exec) {
 
 // static
 std::string Explain::getPlanSummary(const PlanStage* root) {
+    if (root->stageType() == STAGE_PIPELINE_PROXY) {
+        auto pipelineProxy = static_cast<const PipelineProxyStage*>(root);
+        return pipelineProxy->getPlanSummaryStr();
+    }
+
     std::vector<const PlanStage*> stages;
     flattenExecTree(root, &stages);
 
@@ -794,6 +800,12 @@ void Explain::getSummaryStats(const PlanExecutor& exec, PlanSummaryStats* statsO
     invariant(NULL != statsOut);
 
     PlanStage* root = exec.getRootStage();
+
+    if (root->stageType() == STAGE_PIPELINE_PROXY) {
+        auto pipelineProxy = static_cast<PipelineProxyStage*>(root);
+        pipelineProxy->getPlanSummaryStats(statsOut);
+        return;
+    }
 
     // We can get some of the fields we need from the common stats stored in the
     // root stage of the plan tree.

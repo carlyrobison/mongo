@@ -29,8 +29,8 @@
 
 #include "mongo/platform/basic.h"
 
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "mongo/client/connpool.h"
 #include "mongo/client/global_conn_pool.h"
@@ -87,7 +87,7 @@ public:
 
         // We need to handle the isMaster received during connection.
         if (request->getCommandName() == "isMaster") {
-            commandResponse.append("maxWireVersion", WireVersion::FIND_COMMAND);
+            commandResponse.append("maxWireVersion", WireVersion::COMMANDS_ACCEPT_WRITE_CONCERN);
             commandResponse.append("minWireVersion", WireVersion::RELEASE_2_4_AND_BEFORE);
         }
 
@@ -207,8 +207,8 @@ public:
                 break;
             }
             if (timer.seconds() > 20) {
-                FAIL(str::stream()
-                     << "Timed out connecting to dummy server: " << connectStatus.toString());
+                FAIL(str::stream() << "Timed out connecting to dummy server: "
+                                   << connectStatus.toString());
             }
         }
     }

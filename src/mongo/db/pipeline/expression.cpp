@@ -40,9 +40,11 @@
 #include "mongo/db/pipeline/document.h"
 #include "mongo/db/pipeline/expression_context.h"
 #include "mongo/db/pipeline/value.h"
-#include "mongo/util/string_map.h"
-#include "mongo/util/mongoutils/str.h"
 #include "mongo/platform/bits.h"
+#include "mongo/platform/decimal128.h"
+#include "mongo/util/mongoutils/str.h"
+#include "mongo/util/string_map.h"
+#include "mongo/util/summation.h"
 
 namespace mongo {
 using Parser = Expression::Parser;
@@ -85,7 +87,9 @@ void Variables::uassertValidNameForUserWrite(StringData varName) {
 
         uassert(16868,
                 str::stream() << "'" << varName << "' contains an invalid character "
-                              << "for a variable name: '" << varName[i] << "'",
+                              << "for a variable name: '"
+                              << varName[i]
+                              << "'",
                 charIsValid);
     }
 }
@@ -110,7 +114,9 @@ void Variables::uassertValidNameForUserRead(StringData varName) {
 
         uassert(16871,
                 str::stream() << "'" << varName << "' contains an invalid character "
-                              << "for a variable name: '" << varName[i] << "'",
+                              << "for a variable name: '"
+                              << varName[i]
+                              << "'",
                 charIsValid);
     }
 }
@@ -182,7 +188,8 @@ bool Expression::ObjectCtx::inclusionOk() const {
 string Expression::removeFieldPrefix(const string& prefixedField) {
     uassert(16419,
             str::stream() << "field path must not contain embedded null characters"
-                          << prefixedField.find("\0") << ",",
+                          << prefixedField.find("\0")
+                          << ",",
             prefixedField.find('\0') == string::npos);
 
     const char* pPrefixedField = prefixedField.c_str();
@@ -220,7 +227,8 @@ intrusive_ptr<Expression> Expression::parseObject(BSONObj obj,
             uassert(
                 15983,
                 str::stream() << "the operator must be the only field in a pipeline object (at '"
-                              << pFieldName << "'",
+                              << pFieldName
+                              << "'",
                 fieldCount == 0);
 
             uassert(16404,
@@ -234,7 +242,9 @@ intrusive_ptr<Expression> Expression::parseObject(BSONObj obj,
         } else {
             uassert(15990,
                     str::stream() << "this object is already an operator expression, and can't be "
-                                     "used as a document expression (at '" << pFieldName << "')",
+                                     "used as a document expression (at '"
+                                  << pFieldName
+                                  << "')",
                     kind != OPERATOR);
 
             uassert(16405,
@@ -299,7 +309,9 @@ intrusive_ptr<Expression> Expression::parseObject(BSONObj obj,
                 default:
                     uassert(15992,
                             str::stream() << "disallowed field type " << typeName(fieldType)
-                                          << " in object expression (at '" << fieldName << "')",
+                                          << " in object expression (at '"
+                                          << fieldName
+                                          << "')",
                             false);
             }
         }
@@ -404,6 +416,8 @@ Value ExpressionAbs::evaluateNumericArg(const Value& numericArg) const {
     BSONType type = numericArg.getType();
     if (type == NumberDouble) {
         return Value(std::abs(numericArg.getDouble()));
+    } else if (type == NumberDecimal) {
+        return Value(numericArg.getDecimal().toAbs());
     } else {
         long long num = numericArg.getLong();
         uassert(28680,
@@ -422,14 +436,12 @@ const char* ExpressionAbs::getOpName() const {
 /* ------------------------- ExpressionAdd ----------------------------- */
 
 Value ExpressionAdd::evaluateInternal(Variables* vars) const {
-    /*
-      We'll try to return the narrowest possible result value.  To do that
-      without creating intermediate Values, do the arithmetic for double
-      and integral types in parallel, tracking the current narrowest
-      type.
-     */
-    double doubleTotal = 0;
-    long long longTotal = 0;
+    // We'll try to return the narrowest possible result value while avoiding overflow, loss
+    // of precision due to intermediate rounding or implicit use of decimal types. To do that,
+    // compute a compensated sum for non-decimal values and a separate decimal sum for decimal
+    // values, and track the current narrowest type.
+    DoubleDoubleSummation nonDecimalTotal;
+    Decimal128 decimalTotal;
     BSONType totalType = NumberInt;
     bool haveDate = false;
 
@@ -437,40 +449,64 @@ Value ExpressionAdd::evaluateInternal(Variables* vars) const {
     for (size_t i = 0; i < n; ++i) {
         Value val = vpOperand[i]->evaluateInternal(vars);
 
-        if (val.numeric()) {
-            totalType = Value::getWidestNumeric(totalType, val.getType());
-
-            doubleTotal += val.coerceToDouble();
-            longTotal += val.coerceToLong();
-        } else if (val.getType() == Date) {
-            uassert(16612, "only one date allowed in an $add expression", !haveDate);
-            haveDate = true;
-
-            // We don't manipulate totalType here.
-
-            longTotal += val.getDate();
-            doubleTotal += val.getDate();
-        } else if (val.nullish()) {
-            return Value(BSONNULL);
-        } else {
-            uasserted(16554,
-                      str::stream() << "$add only supports numeric or date types, not "
-                                    << typeName(val.getType()));
+        switch (val.getType()) {
+            case NumberDecimal:
+                decimalTotal = decimalTotal.add(val.getDecimal());
+                totalType = NumberDecimal;
+                break;
+            case NumberDouble:
+                nonDecimalTotal.addDouble(val.getDouble());
+                if (totalType != NumberDecimal)
+                    totalType = NumberDouble;
+                break;
+            case NumberLong:
+                nonDecimalTotal.addLong(val.getLong());
+                if (totalType == NumberInt)
+                    totalType = NumberLong;
+                break;
+            case NumberInt:
+                nonDecimalTotal.addDouble(val.getInt());
+                break;
+            case Date:
+                uassert(16612, "only one date allowed in an $add expression", !haveDate);
+                haveDate = true;
+                nonDecimalTotal.addLong(val.getDate());
+                break;
+            default:
+                uassert(16554,
+                        str::stream() << "$add only supports numeric or date types, not "
+                                      << typeName(val.getType()),
+                        val.nullish());
+                return Value(BSONNULL);
         }
     }
 
     if (haveDate) {
-        if (totalType == NumberDouble)
-            longTotal = static_cast<long long>(doubleTotal);
+        int64_t longTotal;
+        if (totalType == NumberDecimal) {
+            longTotal = decimalTotal.add(nonDecimalTotal.getDecimal()).toLong();
+        } else {
+            uassert(ErrorCodes::Overflow, "date overflow in $add", nonDecimalTotal.fitsLong());
+            longTotal = nonDecimalTotal.getLong();
+        }
         return Value(Date_t::fromMillisSinceEpoch(longTotal));
-    } else if (totalType == NumberLong) {
-        return Value(longTotal);
-    } else if (totalType == NumberDouble) {
-        return Value(doubleTotal);
-    } else if (totalType == NumberInt) {
-        return Value::createIntOrLong(longTotal);
-    } else {
-        massert(16417, "$add resulted in a non-numeric type", false);
+    }
+    switch (totalType) {
+        case NumberDecimal:
+            return Value(decimalTotal.add(nonDecimalTotal.getDecimal()));
+        case NumberLong:
+            dassert(nonDecimalTotal.isInteger());
+            if (nonDecimalTotal.fitsLong())
+                return Value(nonDecimalTotal.getLong());
+        // Fallthrough.
+        case NumberInt:
+            if (nonDecimalTotal.fitsLong())
+                return Value::createIntOrLong(nonDecimalTotal.getLong());
+        // Fallthrough.
+        case NumberDouble:
+            return Value(nonDecimalTotal.getDouble());
+        default:
+            massert(16417, "$add resulted in a non-numeric type", false);
     }
 }
 
@@ -637,11 +673,13 @@ Value ExpressionArrayElemAt::evaluateInternal(Variables* vars) const {
             array.isArray());
     uassert(28690,
             str::stream() << getOpName() << "'s second argument must be a numeric value,"
-                          << " but is " << typeName(indexArg.getType()),
+                          << " but is "
+                          << typeName(indexArg.getType()),
             indexArg.numeric());
     uassert(28691,
             str::stream() << getOpName() << "'s second argument must be representable as"
-                          << " a 32-bit integer: " << indexArg.coerceToDouble(),
+                          << " a 32-bit integer: "
+                          << indexArg.coerceToDouble(),
             indexArg.integral());
 
     long long i = indexArg.coerceToLong();
@@ -665,8 +703,16 @@ const char* ExpressionArrayElemAt::getOpName() const {
 
 Value ExpressionCeil::evaluateNumericArg(const Value& numericArg) const {
     // There's no point in taking the ceiling of integers or longs, it will have no effect.
-    return numericArg.getType() == NumberDouble ? Value(std::ceil(numericArg.getDouble()))
-                                                : numericArg;
+    switch (numericArg.getType()) {
+        case NumberDouble:
+            return Value(std::ceil(numericArg.getDouble()));
+        case NumberDecimal:
+            // Round toward the nearest decimal with a zero exponent in the positive direction.
+            return Value(numericArg.getDecimal().quantize(Decimal128::kNormalizedZero,
+                                                          Decimal128::kRoundTowardPositive));
+        default:
+            return numericArg;
+    }
 }
 
 REGISTER_EXPRESSION(ceil, ExpressionCeil::parse);
@@ -969,8 +1015,8 @@ intrusive_ptr<Expression> ExpressionDateToString::parse(BSONElement expr,
             dateElem = arg;
         } else {
             uasserted(18534,
-                      str::stream()
-                          << "Unrecognized argument to $dateToString: " << arg.fieldName());
+                      str::stream() << "Unrecognized argument to $dateToString: "
+                                    << arg.fieldName());
         }
     }
 
@@ -1070,7 +1116,8 @@ string ExpressionDateToString::formatDate(const string& format,
                 const int year = ExpressionYear::extract(tm);
                 uassert(18537,
                         str::stream() << "$dateToString is only defined on year 0-9999,"
-                                      << " tried to use year " << year,
+                                      << " tried to use year "
+                                      << year,
                         (year >= 0) && (year <= 9999));
                 insertPadded(formatted, year, 4);
                 break;
@@ -1190,10 +1237,20 @@ Value ExpressionDivide::evaluateInternal(Variables* vars) const {
     Value lhs = vpOperand[0]->evaluateInternal(vars);
     Value rhs = vpOperand[1]->evaluateInternal(vars);
 
+    auto assertNonZero = [](bool nonZero) { uassert(16608, "can't $divide by zero", nonZero); };
+
     if (lhs.numeric() && rhs.numeric()) {
+        // If, and only if, either side is decimal, return decimal.
+        if (lhs.getType() == NumberDecimal || rhs.getType() == NumberDecimal) {
+            Decimal128 numer = lhs.coerceToDecimal();
+            Decimal128 denom = rhs.coerceToDecimal();
+            assertNonZero(!denom.isZero());
+            return Value(numer.divide(denom));
+        }
+
         double numer = lhs.coerceToDouble();
         double denom = rhs.coerceToDouble();
-        uassert(16608, "can't $divide by zero", denom != 0);
+        assertNonZero(denom != 0.0);
 
         return Value(numer / denom);
     } else if (lhs.nullish() || rhs.nullish()) {
@@ -1201,7 +1258,9 @@ Value ExpressionDivide::evaluateInternal(Variables* vars) const {
     } else {
         uasserted(16609,
                   str::stream() << "$divide only supports numeric types, not "
-                                << typeName(lhs.getType()) << " and " << typeName(rhs.getType()));
+                                << typeName(lhs.getType())
+                                << " and "
+                                << typeName(rhs.getType()));
     }
 }
 
@@ -1213,7 +1272,10 @@ const char* ExpressionDivide::getOpName() const {
 /* ----------------------- ExpressionExp ---------------------------- */
 
 Value ExpressionExp::evaluateNumericArg(const Value& numericArg) const {
-    // exp() always returns a double since e is a double.
+    // $exp always returns either a double or a decimal number, as e is irrational.
+    if (numericArg.getType() == NumberDecimal)
+        return Value(numericArg.coerceToDecimal().exponential());
+
     return Value(exp(numericArg.coerceToDouble()));
 }
 
@@ -1683,8 +1745,9 @@ intrusive_ptr<Expression> ExpressionFilter::optimize() {
 }
 
 Value ExpressionFilter::serialize(bool explain) const {
-    return Value(DOC("$filter" << DOC("input" << _input->serialize(explain) << "as" << _varName
-                                              << "cond" << _filter->serialize(explain))));
+    return Value(
+        DOC("$filter" << DOC("input" << _input->serialize(explain) << "as" << _varName << "cond"
+                                     << _filter->serialize(explain))));
 }
 
 Value ExpressionFilter::evaluateInternal(Variables* vars) const {
@@ -1724,8 +1787,16 @@ void ExpressionFilter::addDependencies(DepsTracker* deps, vector<string>* path) 
 
 Value ExpressionFloor::evaluateNumericArg(const Value& numericArg) const {
     // There's no point in taking the floor of integers or longs, it will have no effect.
-    return numericArg.getType() == NumberDouble ? Value(std::floor(numericArg.getDouble()))
-                                                : numericArg;
+    switch (numericArg.getType()) {
+        case NumberDouble:
+            return Value(std::floor(numericArg.getDouble()));
+        case NumberDecimal:
+            // Round toward the nearest decimal with a zero exponent in the negative direction.
+            return Value(numericArg.getDecimal().quantize(Decimal128::kNormalizedZero,
+                                                          Decimal128::kRoundTowardNegative));
+        default:
+            return numericArg;
+    }
 }
 
 REGISTER_EXPRESSION(floor, ExpressionFloor::parse);
@@ -2012,10 +2083,20 @@ Value ExpressionMod::evaluateInternal(Variables* vars) const {
     BSONType rightType = rhs.getType();
 
     if (lhs.numeric() && rhs.numeric()) {
+        auto assertNonZero = [](bool isZero) { uassert(16610, "can't $mod by zero", !isZero); };
+
+        // If either side is decimal, perform the operation in decimal.
+        if (leftType == NumberDecimal || rightType == NumberDecimal) {
+            Decimal128 left = lhs.coerceToDecimal();
+            Decimal128 right = rhs.coerceToDecimal();
+            assertNonZero(right.isZero());
+
+            return Value(left.modulo(right));
+        }
+
         // ensure we aren't modding by 0
         double right = rhs.coerceToDouble();
-
-        uassert(16610, "can't $mod by 0", right != 0);
+        assertNonZero(right == 0);
 
         if (leftType == NumberDouble || (rightType == NumberDouble && !rhs.integral())) {
             // Need to do fmod. Integer-valued double case is handled below.
@@ -2038,7 +2119,9 @@ Value ExpressionMod::evaluateInternal(Variables* vars) const {
     } else {
         uasserted(16611,
                   str::stream() << "$mod only supports numeric types, not "
-                                << typeName(lhs.getType()) << " and " << typeName(rhs.getType()));
+                                << typeName(lhs.getType())
+                                << " and "
+                                << typeName(rhs.getType()));
     }
 }
 
@@ -2070,6 +2153,8 @@ Value ExpressionMultiply::evaluateInternal(Variables* vars) const {
      */
     double doubleProduct = 1;
     long long longProduct = 1;
+    Decimal128 decimalProduct;  // This will be initialized on encountering the first decimal.
+
     BSONType productType = NumberInt;
 
     const size_t n = vpOperand.size();
@@ -2077,10 +2162,23 @@ Value ExpressionMultiply::evaluateInternal(Variables* vars) const {
         Value val = vpOperand[i]->evaluateInternal(vars);
 
         if (val.numeric()) {
+            BSONType oldProductType = productType;
             productType = Value::getWidestNumeric(productType, val.getType());
-
-            doubleProduct *= val.coerceToDouble();
-            longProduct *= val.coerceToLong();
+            if (productType == NumberDecimal) {
+                // On finding the first decimal, convert the partial product to decimal.
+                if (oldProductType != NumberDecimal) {
+                    decimalProduct = oldProductType == NumberDouble
+                        ? Decimal128(doubleProduct, Decimal128::kRoundTo15Digits)
+                        : Decimal128(static_cast<int64_t>(longProduct));
+                }
+                decimalProduct = decimalProduct.multiply(val.coerceToDecimal());
+            } else {
+                doubleProduct *= val.coerceToDouble();
+                if (mongoSignedMultiplyOverflow64(longProduct, val.coerceToLong(), &longProduct)) {
+                    // The 'longProduct' would have overflowed, so we're abandoning it.
+                    productType = NumberDouble;
+                }
+            }
         } else if (val.nullish()) {
             return Value(BSONNULL);
         } else {
@@ -2096,6 +2194,8 @@ Value ExpressionMultiply::evaluateInternal(Variables* vars) const {
         return Value(longProduct);
     else if (productType == NumberInt)
         return Value::createIntOrLong(longProduct);
+    else if (productType == NumberDecimal)
+        return Value(decimalProduct);
     else
         massert(16418, "$multiply resulted in a non-numeric type", false);
 }
@@ -2165,12 +2265,15 @@ void uassertIfNotIntegralAndNonNegative(Value val,
                                         StringData argumentName) {
     uassert(40096,
             str::stream() << expressionName << "requires an integral " << argumentName
-                          << ", found a value of type: " << typeName(val.getType())
-                          << ", with value: " << val.toString(),
+                          << ", found a value of type: "
+                          << typeName(val.getType())
+                          << ", with value: "
+                          << val.toString(),
             val.integral());
     uassert(40097,
             str::stream() << expressionName << " requires a nonnegative " << argumentName
-                          << ", found: " << val.toString(),
+                          << ", found: "
+                          << val.toString(),
             val.coerceToInt() >= 0);
 }
 
@@ -2369,6 +2472,12 @@ const char* ExpressionIndexOfCP::getOpName() const {
 /* ----------------------- ExpressionLn ---------------------------- */
 
 Value ExpressionLn::evaluateNumericArg(const Value& numericArg) const {
+    if (numericArg.getType() == NumberDecimal) {
+        Decimal128 argDecimal = numericArg.getDecimal();
+        if (argDecimal.isGreater(Decimal128::kNormalizedZero))
+            return Value(argDecimal.logarithm());
+        // Fall through for error case.
+    }
     double argDouble = numericArg.coerceToDouble();
     uassert(28766,
             str::stream() << "$ln's argument must be a positive number, but is " << argDouble,
@@ -2396,6 +2505,18 @@ Value ExpressionLog::evaluateInternal(Variables* vars) const {
             str::stream() << "$log's base must be numeric, not " << typeName(baseVal.getType()),
             baseVal.numeric());
 
+    if (argVal.getType() == NumberDecimal || baseVal.getType() == NumberDecimal) {
+        Decimal128 argDecimal = argVal.coerceToDecimal();
+        Decimal128 baseDecimal = baseVal.coerceToDecimal();
+
+        if (argDecimal.isGreater(Decimal128::kNormalizedZero) &&
+            baseDecimal.isNotEqual(Decimal128(1)) &&
+            baseDecimal.isGreater(Decimal128::kNormalizedZero)) {
+            return Value(argDecimal.logarithm(baseDecimal));
+        }
+        // Fall through for error cases.
+    }
+
     double argDouble = argVal.coerceToDouble();
     double baseDouble = baseVal.coerceToDouble();
     uassert(28758,
@@ -2416,6 +2537,13 @@ const char* ExpressionLog::getOpName() const {
 /* ----------------------- ExpressionLog10 ---------------------------- */
 
 Value ExpressionLog10::evaluateNumericArg(const Value& numericArg) const {
+    if (numericArg.getType() == NumberDecimal) {
+        Decimal128 argDecimal = numericArg.getDecimal();
+        if (argDecimal.isGreater(Decimal128::kNormalizedZero))
+            return Value(argDecimal.logarithm(Decimal128(10)));
+        // Fall through for error case.
+    }
+
     double argDouble = numericArg.coerceToDouble();
     uassert(28761,
             str::stream() << "$log10's argument must be a positive number, but is " << argDouble,
@@ -2651,15 +2779,24 @@ Value ExpressionPow::evaluateInternal(Variables* vars) const {
             str::stream() << "$pow's exponent must be numeric, not " << typeName(expType),
             expVal.numeric());
 
+    auto checkNonZeroAndNeg = [](bool isZeroAndNeg) {
+        uassert(28764, "$pow cannot take a base of 0 and a negative exponent", !isZeroAndNeg);
+    };
+
+    // If either argument is decimal, return a decimal.
+    if (baseType == NumberDecimal || expType == NumberDecimal) {
+        Decimal128 baseDecimal = baseVal.coerceToDecimal();
+        Decimal128 expDecimal = expVal.coerceToDecimal();
+        checkNonZeroAndNeg(baseDecimal.isZero() && expDecimal.isNegative());
+        return Value(baseDecimal.power(expDecimal));
+    }
+
     // pow() will cast args to doubles.
     double baseDouble = baseVal.coerceToDouble();
     double expDouble = expVal.coerceToDouble();
+    checkNonZeroAndNeg(baseDouble == 0 && expDouble < 0);
 
-    uassert(28764,
-            "$pow cannot take a base of 0 and a negative exponent",
-            !(baseDouble == 0 && expDouble < 0));
-
-    // If either number is a double, return a double.
+    // If either argument is a double, return a double.
     if (baseType == NumberDouble || expType == NumberDouble) {
         return Value(std::pow(baseDouble, expDouble));
     }
@@ -2796,7 +2933,8 @@ Value ExpressionRange::evaluateInternal(Variables* vars) const {
             startVal.numeric());
     uassert(34444,
             str::stream() << "$range requires a starting value that can be represented as a 32-bit "
-                             "integer, found value: " << startVal.toString(),
+                             "integer, found value: "
+                          << startVal.toString(),
             startVal.integral());
     uassert(34445,
             str::stream() << "$range requires a numeric ending value, found value of type: "
@@ -2804,7 +2942,8 @@ Value ExpressionRange::evaluateInternal(Variables* vars) const {
             endVal.numeric());
     uassert(34446,
             str::stream() << "$range requires an ending value that can be represented as a 32-bit "
-                             "integer, found value: " << endVal.toString(),
+                             "integer, found value: "
+                          << endVal.toString(),
             endVal.integral());
 
     int current = startVal.coerceToInt();
@@ -2821,7 +2960,8 @@ Value ExpressionRange::evaluateInternal(Variables* vars) const {
                 stepVal.numeric());
         uassert(34448,
                 str::stream() << "$range requires a step value that can be represented as a 32-bit "
-                                 "integer, found value: " << stepVal.toString(),
+                                 "integer, found value: "
+                              << stepVal.toString(),
                 stepVal.integral());
         step = stepVal.coerceToInt();
 
@@ -2984,11 +3124,13 @@ Value ExpressionSetDifference::evaluateInternal(Variables* vars) const {
 
     uassert(17048,
             str::stream() << "both operands of $setDifference must be arrays. First "
-                          << "argument is of type: " << typeName(lhs.getType()),
+                          << "argument is of type: "
+                          << typeName(lhs.getType()),
             lhs.isArray());
     uassert(17049,
             str::stream() << "both operands of $setDifference must be arrays. Second "
-                          << "argument is of type: " << typeName(rhs.getType()),
+                          << "argument is of type: "
+                          << typeName(rhs.getType()),
             rhs.isArray());
 
     ValueSet rhsSet = arrayToSet(rhs);
@@ -3026,7 +3168,8 @@ Value ExpressionSetEquals::evaluateInternal(Variables* vars) const {
         const Value nextEntry = vpOperand[i]->evaluateInternal(vars);
         uassert(17044,
                 str::stream() << "All operands of $setEquals must be arrays. One "
-                              << "argument is of type: " << typeName(nextEntry.getType()),
+                              << "argument is of type: "
+                              << typeName(nextEntry.getType()),
                 nextEntry.isArray());
 
         if (i == 0) {
@@ -3058,7 +3201,8 @@ Value ExpressionSetIntersection::evaluateInternal(Variables* vars) const {
         }
         uassert(17047,
                 str::stream() << "All operands of $setIntersection must be arrays. One "
-                              << "argument is of type: " << typeName(nextEntry.getType()),
+                              << "argument is of type: "
+                              << typeName(nextEntry.getType()),
                 nextEntry.isArray());
 
         if (i == 0) {
@@ -3113,11 +3257,13 @@ Value ExpressionSetIsSubset::evaluateInternal(Variables* vars) const {
 
     uassert(17046,
             str::stream() << "both operands of $setIsSubset must be arrays. First "
-                          << "argument is of type: " << typeName(lhs.getType()),
+                          << "argument is of type: "
+                          << typeName(lhs.getType()),
             lhs.isArray());
     uassert(17042,
             str::stream() << "both operands of $setIsSubset must be arrays. Second "
-                          << "argument is of type: " << typeName(rhs.getType()),
+                          << "argument is of type: "
+                          << typeName(rhs.getType()),
             rhs.isArray());
 
     return setIsSubsetHelper(lhs.getArray(), arrayToSet(rhs));
@@ -3142,7 +3288,8 @@ public:
 
         uassert(17310,
                 str::stream() << "both operands of $setIsSubset must be arrays. First "
-                              << "argument is of type: " << typeName(lhs.getType()),
+                              << "argument is of type: "
+                              << typeName(lhs.getType()),
                 lhs.isArray());
 
         return setIsSubsetHelper(lhs.getArray(), _cachedRhsSet);
@@ -3164,7 +3311,8 @@ intrusive_ptr<Expression> ExpressionSetIsSubset::optimize() {
         const Value rhs = ec->getValue();
         uassert(17311,
                 str::stream() << "both operands of $setIsSubset must be arrays. Second "
-                              << "argument is of type: " << typeName(rhs.getType()),
+                              << "argument is of type: "
+                              << typeName(rhs.getType()),
                 rhs.isArray());
 
         return new Optimized(arrayToSet(rhs), vpOperand);
@@ -3189,7 +3337,8 @@ Value ExpressionSetUnion::evaluateInternal(Variables* vars) const {
         }
         uassert(17043,
                 str::stream() << "All operands of $setUnion must be arrays. One argument"
-                              << " is of type: " << typeName(newEntries.getType()),
+                              << " is of type: "
+                              << typeName(newEntries.getType()),
                 newEntries.isArray());
 
         unionedSet.insert(newEntries.getArray().begin(), newEntries.getArray().end());
@@ -3229,15 +3378,18 @@ Value ExpressionSlice::evaluateInternal(Variables* vars) const {
 
     uassert(28724,
             str::stream() << "First argument to $slice must be an array, but is"
-                          << " of type: " << typeName(arrayVal.getType()),
+                          << " of type: "
+                          << typeName(arrayVal.getType()),
             arrayVal.isArray());
     uassert(28725,
             str::stream() << "Second argument to $slice must be a numeric value,"
-                          << " but is of type: " << typeName(arg2.getType()),
+                          << " but is of type: "
+                          << typeName(arg2.getType()),
             arg2.numeric());
     uassert(28726,
             str::stream() << "Second argument to $slice can't be represented as"
-                          << " a 32-bit integer: " << arg2.coerceToDouble(),
+                          << " a 32-bit integer: "
+                          << arg2.coerceToDouble(),
             arg2.integral());
 
     const auto& array = arrayVal.getArray();
@@ -3277,11 +3429,13 @@ Value ExpressionSlice::evaluateInternal(Variables* vars) const {
 
         uassert(28727,
                 str::stream() << "Third argument to $slice must be numeric, but "
-                              << "is of type: " << typeName(countVal.getType()),
+                              << "is of type: "
+                              << typeName(countVal.getType()),
                 countVal.numeric());
         uassert(28728,
                 str::stream() << "Third argument to $slice can't be represented"
-                              << " as a 32-bit integer: " << countVal.coerceToDouble(),
+                              << " as a 32-bit integer: "
+                              << countVal.coerceToDouble(),
                 countVal.integral());
         uassert(28729,
                 str::stream() << "Third argument to $slice must be positive: "
@@ -3329,11 +3483,13 @@ Value ExpressionSplit::evaluateInternal(Variables* vars) const {
 
     uassert(40085,
             str::stream() << "$split requires an expression that evaluates to a string as a first "
-                             "argument, found: " << typeName(inputArg.getType()),
+                             "argument, found: "
+                          << typeName(inputArg.getType()),
             inputArg.getType() == BSONType::String);
     uassert(40086,
             str::stream() << "$split requires an expression that evaluates to a string as a second "
-                             "argument, found: " << typeName(separatorArg.getType()),
+                             "argument, found: "
+                          << typeName(separatorArg.getType()),
             separatorArg.getType() == BSONType::String);
 
     std::string input = inputArg.getString();
@@ -3374,10 +3530,17 @@ const char* ExpressionSplit::getOpName() const {
 /* ----------------------- ExpressionSqrt ---------------------------- */
 
 Value ExpressionSqrt::evaluateNumericArg(const Value& numericArg) const {
+    auto checkArg = [](bool nonNegative) {
+        uassert(28714, "$sqrt's argument must be greater than or equal to 0", nonNegative);
+    };
+
+    if (numericArg.getType() == NumberDecimal) {
+        Decimal128 argDec = numericArg.getDecimal();
+        checkArg(!argDec.isLess(Decimal128::kNormalizedZero));  // NaN returns Nan without error
+        return Value(argDec.squareRoot());
+    }
     double argDouble = numericArg.coerceToDouble();
-    uassert(28714,
-            "$sqrt's argument must be greater than or equal to 0",
-            argDouble >= 0 || std::isnan(argDouble));
+    checkArg(!(argDouble < 0));  // NaN returns Nan without error
     return Value(sqrt(argDouble));
 }
 
@@ -3421,12 +3584,14 @@ Value ExpressionSubstrBytes::evaluateInternal(Variables* vars) const {
     uassert(16034,
             str::stream() << getOpName()
                           << ":  starting index must be a numeric type (is BSON type "
-                          << typeName(pLower.getType()) << ")",
+                          << typeName(pLower.getType())
+                          << ")",
             (pLower.getType() == NumberInt || pLower.getType() == NumberLong ||
              pLower.getType() == NumberDouble));
     uassert(16035,
             str::stream() << getOpName() << ":  length must be a numeric type (is BSON type "
-                          << typeName(pLength.getType()) << ")",
+                          << typeName(pLength.getType())
+                          << ")",
             (pLength.getType() == NumberInt || pLength.getType() == NumberLong ||
              pLength.getType() == NumberDouble));
 
@@ -3471,7 +3636,8 @@ Value ExpressionSubstrCP::evaluateInternal(Variables* vars) const {
     std::string str = inputVal.coerceToString();
     uassert(34450,
             str::stream() << getOpName() << ": starting index must be a numeric type (is BSON type "
-                          << typeName(lowerVal.getType()) << ")",
+                          << typeName(lowerVal.getType())
+                          << ")",
             lowerVal.numeric());
     uassert(34451,
             str::stream() << getOpName()
@@ -3480,7 +3646,8 @@ Value ExpressionSubstrCP::evaluateInternal(Variables* vars) const {
             lowerVal.integral());
     uassert(34452,
             str::stream() << getOpName() << ": length must be a numeric type (is BSON type "
-                          << typeName(lengthVal.getType()) << ")",
+                          << typeName(lengthVal.getType())
+                          << ")",
             lengthVal.numeric());
     uassert(34453,
             str::stream() << getOpName()
@@ -3562,10 +3729,10 @@ const char* ExpressionStrLenBytes::getOpName() const {
 Value ExpressionStrLenCP::evaluateInternal(Variables* vars) const {
     Value val(vpOperand[0]->evaluateInternal(vars));
 
-    uassert(
-        34471,
-        str::stream() << "$strLenCP requires a string argument, found: " << typeName(val.getType()),
-        val.getType() == String);
+    uassert(34471,
+            str::stream() << "$strLenCP requires a string argument, found: "
+                          << typeName(val.getType()),
+            val.getType() == String);
 
     std::string stringVal = val.getString();
 
@@ -3594,7 +3761,11 @@ Value ExpressionSubtract::evaluateInternal(Variables* vars) const {
 
     BSONType diffType = Value::getWidestNumeric(rhs.getType(), lhs.getType());
 
-    if (diffType == NumberDouble) {
+    if (diffType == NumberDecimal) {
+        Decimal128 right = rhs.coerceToDecimal();
+        Decimal128 left = lhs.coerceToDecimal();
+        return Value(left.subtract(right));
+    } else if (diffType == NumberDouble) {
         double right = rhs.coerceToDouble();
         double left = lhs.coerceToDouble();
         return Value(left - right);
@@ -3794,8 +3965,15 @@ const char* ExpressionToUpper::getOpName() const {
 
 Value ExpressionTrunc::evaluateNumericArg(const Value& numericArg) const {
     // There's no point in truncating integers or longs, it will have no effect.
-    return numericArg.getType() == NumberDouble ? Value(std::trunc(numericArg.getDouble()))
-                                                : numericArg;
+    switch (numericArg.getType()) {
+        case NumberDecimal:
+            return Value(numericArg.getDecimal().quantize(Decimal128::kNormalizedZero,
+                                                          Decimal128::kRoundTowardZero));
+        case NumberDouble:
+            return Value(std::trunc(numericArg.getDouble()));
+        default:
+            return numericArg;
+    }
 }
 
 REGISTER_EXPRESSION(trunc, ExpressionTrunc::parse);
@@ -4076,10 +4254,10 @@ Value ExpressionZip::evaluateInternal(Variables* vars) const {
             return Value(BSONNULL);
         }
 
-        uassert(
-            34468,
-            str::stream() << "$zip found a non-array expression in input: " << evalExpr.toString(),
-            evalExpr.isArray());
+        uassert(34468,
+                str::stream() << "$zip found a non-array expression in input: "
+                              << evalExpr.toString(),
+                evalExpr.isArray());
 
         inputValues.push_back(evalExpr.getArray());
 
@@ -4136,14 +4314,16 @@ boost::intrusive_ptr<Expression> ExpressionZip::optimize() {
     std::transform(_inputs.begin(),
                    _inputs.end(),
                    _inputs.begin(),
-                   [](intrusive_ptr<Expression> inputExpression)
-                       -> intrusive_ptr<Expression> { return inputExpression->optimize(); });
+                   [](intrusive_ptr<Expression> inputExpression) -> intrusive_ptr<Expression> {
+                       return inputExpression->optimize();
+                   });
 
     std::transform(_defaults.begin(),
                    _defaults.end(),
                    _defaults.begin(),
-                   [](intrusive_ptr<Expression> defaultExpression)
-                       -> intrusive_ptr<Expression> { return defaultExpression->optimize(); });
+                   [](intrusive_ptr<Expression> defaultExpression) -> intrusive_ptr<Expression> {
+                       return defaultExpression->optimize();
+                   });
 
     return this;
 }
@@ -4162,19 +4342,21 @@ Value ExpressionZip::serialize(bool explain) const {
     }
 
     return Value(DOC("$zip" << DOC("inputs" << Value(serializedInput) << "defaults"
-                                            << Value(serializedDefaults) << "useLongestLength"
+                                            << Value(serializedDefaults)
+                                            << "useLongestLength"
                                             << serializedUseLongestLength)));
 }
 
 void ExpressionZip::addDependencies(DepsTracker* deps, std::vector<std::string>* path) const {
-    std::for_each(_inputs.begin(),
-                  _inputs.end(),
-                  [&deps](intrusive_ptr<Expression> inputExpression)
-                      -> void { inputExpression->addDependencies(deps); });
+    std::for_each(
+        _inputs.begin(), _inputs.end(), [&deps](intrusive_ptr<Expression> inputExpression) -> void {
+            inputExpression->addDependencies(deps);
+        });
     std::for_each(_defaults.begin(),
                   _defaults.end(),
-                  [&deps](intrusive_ptr<Expression> defaultExpression)
-                      -> void { defaultExpression->addDependencies(deps); });
+                  [&deps](intrusive_ptr<Expression> defaultExpression) -> void {
+                      defaultExpression->addDependencies(deps);
+                  });
 }
 
 const char* ExpressionZip::getOpName() const {

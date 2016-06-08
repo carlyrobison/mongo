@@ -52,6 +52,8 @@
 #include "mongo/db/instance.h"
 #include "mongo/db/introspect.h"
 #include "mongo/db/op_observer.h"
+#include "mongo/db/query/collation/collation_serializer.h"
+#include "mongo/db/query/collation/collator_factory_interface.h"
 #include "mongo/db/repl/oplog.h"
 #include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/server_parameters.h"
@@ -499,7 +501,9 @@ Collection* Database::createCollection(OperationContext* txn,
         // This check only applies for actual collections, not indexes or other types of ns.
         uassert(17381,
                 str::stream() << "fully qualified namespace " << ns << " is too long "
-                              << "(max is " << NamespaceString::MaxNsCollectionLen << " bytes)",
+                              << "(max is "
+                              << NamespaceString::MaxNsCollectionLen
+                              << " bytes)",
                 ns.size() <= NamespaceString::MaxNsCollectionLen);
     }
 
@@ -623,6 +627,26 @@ Status userCreateNS(OperationContext* txn,
     Status status = collectionOptions.parse(options);
     if (!status.isOK())
         return status;
+
+    // Validate the collation, if there is one.
+    if (!collectionOptions.collation.isEmpty()) {
+        auto collator = CollatorFactoryInterface::get(txn->getServiceContext())
+                            ->makeFromBSON(collectionOptions.collation);
+        if (!collator.isOK()) {
+            return collator.getStatus();
+        }
+
+        // If the collator factory returned a non-null collator, set the collation option to the
+        // result of serializing the collator's spec back into BSON. We do this in order to fill in
+        // all options that the user omitted.
+        //
+        // If the collator factory returned a null collator (representing the "simple" collation),
+        // we can't use the collation serializer. In this case, we simply set the collation option
+        // to the original user BSON.
+        collectionOptions.collation = collator.getValue()
+            ? CollationSerializer::specToBSON(collator.getValue()->getSpec())
+            : collectionOptions.collation;
+    }
 
     status =
         validateStorageOptions(collectionOptions.storageEngine,

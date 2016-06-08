@@ -36,8 +36,6 @@
 #include "mongo/db/concurrency/lock_state.h"
 #include "mongo/db/curop.h"
 #include "mongo/db/service_context.h"
-#include "mongo/db/namespace_string.h"
-#include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/storage/storage_engine.h"
 #include "mongo/stdx/memory.h"
 
@@ -52,11 +50,11 @@ std::unique_ptr<Locker> newLocker() {
 
 class ClientOperationInfo {
 public:
-    Locker* getLocker() {
+    std::unique_ptr<Locker>& locker() {
         if (!_locker) {
             _locker = newLocker();
         }
-        return _locker.get();
+        return _locker;
     }
 
 private:
@@ -65,27 +63,20 @@ private:
 
 const auto clientOperationInfoDecoration = Client::declareDecoration<ClientOperationInfo>();
 
-AtomicUInt32 nextOpId{1};
 }  // namespace
 
 using std::string;
 
-OperationContextImpl::OperationContextImpl()
-    : OperationContext(
-          &cc(), nextOpId.fetchAndAdd(1), clientOperationInfoDecoration(cc()).getLocker()) {
+OperationContextImpl::OperationContextImpl(Client* client, unsigned opId)
+    : OperationContext(client, opId) {
+    setLockState(std::move(clientOperationInfoDecoration(client).locker()));
     StorageEngine* storageEngine = getServiceContext()->getGlobalStorageEngine();
     setRecoveryUnit(storageEngine->newRecoveryUnit(), kNotInUnitOfWork);
-
-    auto client = getClient();
-    stdx::lock_guard<Client> lk(*client);
-    client->setOperationContext(this);
 }
 
 OperationContextImpl::~OperationContextImpl() {
     lockState()->assertEmptyAndReset();
-    auto client = getClient();
-    stdx::lock_guard<Client> lk(*client);
-    client->resetOperationContext();
+    clientOperationInfoDecoration(getClient()).locker() = releaseLockState();
 }
 
 ProgressMeter* OperationContextImpl::setMessage_inlock(const char* msg,
@@ -93,10 +84,6 @@ ProgressMeter* OperationContextImpl::setMessage_inlock(const char* msg,
                                                        unsigned long long progressMeterTotal,
                                                        int secondsBetween) {
     return &CurOp::get(this)->setMessage_inlock(msg, name, progressMeterTotal, secondsBetween);
-}
-
-string OperationContextImpl::getNS() const {
-    return CurOp::get(this)->getNS();
 }
 
 }  // namespace mongo

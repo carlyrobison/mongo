@@ -60,10 +60,7 @@
 
     checkLog(secondary,
              'initial sync - initialSyncHangBeforeGettingMissingDocument fail point enabled');
-    var doc = {
-        _id: 0,
-        x: 3
-    };
+    var doc = {_id: 0, x: 3};
     // Re-insert deleted document.
     assert.writeOK(coll.insert(doc, {writeConcern: {w: 1}}));
 
@@ -77,6 +74,8 @@
     checkLog(secondary, 'initial sync done');
 
     replSet.awaitReplication();
+    replSet.awaitSecondaryNodes();
+
     var coll = secondary.getDB('test').getCollection(name);
     assert.eq(1, coll.count(), 'collection successfully synced to secondary');
     assert.eq(doc, coll.findOne(), 'document on secondary matches primary');

@@ -56,6 +56,7 @@ env.Library(
         'storage_interface.cpp',
     ],
     LIBDEPS=[
+        'oplog_entry',
         'optime',
         '$BUILD_DIR/mongo/db/service_context',
         '$BUILD_DIR/mongo/util/decorable',
@@ -79,6 +80,7 @@ env.CppUnitTest(
         'storage_interface_impl_test.cpp',
     ],
     LIBDEPS=[
+        'oplog_interface_local',
         'replmocks',
         'storage_interface_impl',
         '$BUILD_DIR/mongo/db/service_context_d_test_fixture',
@@ -125,6 +127,7 @@ env.CppUnitTest(
     ],
     LIBDEPS=[
         'replication_executor_test_fixture',
+        '$BUILD_DIR/mongo/db/bson/dotted_path_support',
         '$BUILD_DIR/mongo/unittest/concurrency',
     ],
 )
@@ -269,6 +272,7 @@ env.CppUnitTest(
         'sync_tail_test.cpp',
     ],
     LIBDEPS=[
+        'oplog_interface_local',
         'replmocks',
         'sync_tail',
         '$BUILD_DIR/mongo/db/service_context_d_test_fixture',
@@ -881,7 +885,9 @@ env.Library(
         'data_replicator_external_state_mock.cpp',
     ],
     LIBDEPS=[
+        'oplog_entry',
         'optime',
+        '$BUILD_DIR/mongo/util/net/hostandport',
     ],
 )
 
@@ -898,6 +904,7 @@ env.Library(
         'oplog_fetcher',
         'optime',
         'reporter',
+	'rollback_checker',
         'storage_interface',
         '$BUILD_DIR/mongo/client/fetcher',
     ],
@@ -913,6 +920,28 @@ env.CppUnitTest(
         'data_replicator',
         'data_replicator_external_state_mock',
         'replication_executor_test_fixture',
+        '$BUILD_DIR/mongo/unittest/concurrency',
+    ],
+)
+
+env.Library(
+    target='rollback_checker',
+    source=[
+        'rollback_checker.cpp',
+    ],
+    LIBDEPS=[
+        'replication_executor',
+    ],
+)
+
+env.CppUnitTest(
+    target='rollback_checker_test',
+    source=[
+        'rollback_checker_test.cpp',
+    ],
+    LIBDEPS=[
+        'replication_executor_test_fixture',
+        'rollback_checker',
         '$BUILD_DIR/mongo/unittest/concurrency',
     ],
 )

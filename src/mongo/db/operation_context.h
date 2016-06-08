@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "mongo/base/disallow_copying.h"
 #include "mongo/base/status.h"
 #include "mongo/db/client.h"
@@ -109,8 +111,20 @@ public:
      * Interface for locking.  Caller DOES NOT own pointer.
      */
     Locker* lockState() const {
-        return _locker;
+        return _locker.get();
     }
+
+    /**
+     * Sets the locker for use by this OperationContext. Call during OperationContext
+     * initialization, only.
+     */
+    void setLockState(std::unique_ptr<Locker> locker);
+
+    /**
+     * Releases the locker to the caller. Call during OperationContext cleanup or initialization,
+     * only.
+     */
+    std::unique_ptr<Locker> releaseLockState();
 
     // --- operation level info? ---
 
@@ -134,13 +148,6 @@ public:
                                              const std::string& name = "Progress",
                                              unsigned long long progressMeterTotal = 0,
                                              int secondsBetween = 3) = 0;
-
-    /**
-     * Delegates to CurOp, but is included here to break dependencies.
-     *
-     * TODO: We return a string because of hopefully transient CurOp thread-unsafe insanity.
-     */
-    virtual std::string getNS() const = 0;
 
     /**
      * Returns the service context under which this operation context runs.
@@ -276,7 +283,7 @@ public:
     Microseconds getRemainingMaxTimeMicros() const;
 
 protected:
-    OperationContext(Client* client, unsigned int opId, Locker* locker);
+    OperationContext(Client* client, unsigned int opId);
 
 private:
     /**
@@ -295,8 +302,7 @@ private:
     Client* const _client;
     const unsigned int _opId;
 
-    // Not owned.
-    Locker* const _locker;
+    std::unique_ptr<Locker> _locker;
 
     std::unique_ptr<RecoveryUnit> _recoveryUnit;
     RecoveryUnitState _ruState = kNotInUnitOfWork;

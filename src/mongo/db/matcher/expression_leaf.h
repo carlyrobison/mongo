@@ -32,8 +32,8 @@
 
 #include <unordered_map>
 
-#include "mongo/bson/bsonobj.h"
 #include "mongo/bson/bsonmisc.h"
+#include "mongo/bson/bsonobj.h"
 #include "mongo/db/matcher/expression.h"
 #include "mongo/stdx/memory.h"
 
@@ -84,11 +84,7 @@ private:
  */
 class ComparisonMatchExpression : public LeafMatchExpression {
 public:
-    /**
-     * 'collator' must outlive the ComparisonMatchExpression and any clones made of it.
-     */
-    ComparisonMatchExpression(MatchType type, const CollatorInterface* collator)
-        : LeafMatchExpression(type), _collator(collator) {}
+    ComparisonMatchExpression(MatchType type) : LeafMatchExpression(type) {}
 
     Status init(StringData path, const BSONElement& rhs);
 
@@ -101,6 +97,13 @@ public:
     }
 
     virtual void debugString(StringBuilder& debug, int level = 0) const;
+
+    /**
+     * 'collator' must outlive the ComparisonMatchExpression and any clones made of it.
+     */
+    void setCollator(const CollatorInterface* collator) {
+        _collator = collator;
+    }
 
     virtual void serialize(BSONObjBuilder* out) const;
 
@@ -116,7 +119,9 @@ public:
 
 protected:
     BSONElement _rhs;
-    const CollatorInterface* _collator;
+
+    // Collator used to compare elements. By default, simple binary comparison will be used.
+    const CollatorInterface* _collator = nullptr;
 };
 
 //
@@ -125,75 +130,70 @@ protected:
 
 class EqualityMatchExpression : public ComparisonMatchExpression {
 public:
-    EqualityMatchExpression(const CollatorInterface* collator)
-        : ComparisonMatchExpression(EQ, collator) {}
+    EqualityMatchExpression() : ComparisonMatchExpression(EQ) {}
     virtual std::unique_ptr<MatchExpression> shallowClone() const {
-        std::unique_ptr<ComparisonMatchExpression> e =
-            stdx::make_unique<EqualityMatchExpression>(_collator);
+        std::unique_ptr<ComparisonMatchExpression> e = stdx::make_unique<EqualityMatchExpression>();
         e->init(path(), _rhs);
         if (getTag()) {
             e->setTag(getTag()->clone());
         }
+        e->setCollator(_collator);
         return std::move(e);
     }
 };
 
 class LTEMatchExpression : public ComparisonMatchExpression {
 public:
-    LTEMatchExpression(const CollatorInterface* collator)
-        : ComparisonMatchExpression(LTE, collator) {}
+    LTEMatchExpression() : ComparisonMatchExpression(LTE) {}
     virtual std::unique_ptr<MatchExpression> shallowClone() const {
-        std::unique_ptr<ComparisonMatchExpression> e =
-            stdx::make_unique<LTEMatchExpression>(_collator);
+        std::unique_ptr<ComparisonMatchExpression> e = stdx::make_unique<LTEMatchExpression>();
         e->init(path(), _rhs);
         if (getTag()) {
             e->setTag(getTag()->clone());
         }
+        e->setCollator(_collator);
         return std::move(e);
     }
 };
 
 class LTMatchExpression : public ComparisonMatchExpression {
 public:
-    LTMatchExpression(const CollatorInterface* collator)
-        : ComparisonMatchExpression(LT, collator) {}
+    LTMatchExpression() : ComparisonMatchExpression(LT) {}
     virtual std::unique_ptr<MatchExpression> shallowClone() const {
-        std::unique_ptr<ComparisonMatchExpression> e =
-            stdx::make_unique<LTMatchExpression>(_collator);
+        std::unique_ptr<ComparisonMatchExpression> e = stdx::make_unique<LTMatchExpression>();
         e->init(path(), _rhs);
         if (getTag()) {
             e->setTag(getTag()->clone());
         }
+        e->setCollator(_collator);
         return std::move(e);
     }
 };
 
 class GTMatchExpression : public ComparisonMatchExpression {
 public:
-    GTMatchExpression(const CollatorInterface* collator)
-        : ComparisonMatchExpression(GT, collator) {}
+    GTMatchExpression() : ComparisonMatchExpression(GT) {}
     virtual std::unique_ptr<MatchExpression> shallowClone() const {
-        std::unique_ptr<ComparisonMatchExpression> e =
-            stdx::make_unique<GTMatchExpression>(_collator);
+        std::unique_ptr<ComparisonMatchExpression> e = stdx::make_unique<GTMatchExpression>();
         e->init(path(), _rhs);
         if (getTag()) {
             e->setTag(getTag()->clone());
         }
+        e->setCollator(_collator);
         return std::move(e);
     }
 };
 
 class GTEMatchExpression : public ComparisonMatchExpression {
 public:
-    GTEMatchExpression(const CollatorInterface* collator)
-        : ComparisonMatchExpression(GTE, collator) {}
+    GTEMatchExpression() : ComparisonMatchExpression(GTE) {}
     virtual std::unique_ptr<MatchExpression> shallowClone() const {
-        std::unique_ptr<ComparisonMatchExpression> e =
-            stdx::make_unique<GTEMatchExpression>(_collator);
+        std::unique_ptr<ComparisonMatchExpression> e = stdx::make_unique<GTEMatchExpression>();
         e->init(path(), _rhs);
         if (getTag()) {
             e->setTag(getTag()->clone());
         }
+        e->setCollator(_collator);
         return std::move(e);
     }
 };
@@ -309,69 +309,6 @@ public:
 };
 
 /**
- * INTERNAL
- * terrible name
- * holds the entries of an $in or $all
- * either scalars or regex
- */
-class ArrayFilterEntries {
-    MONGO_DISALLOW_COPYING(ArrayFilterEntries);
-
-public:
-    ArrayFilterEntries(const CollatorInterface* collator);
-    ~ArrayFilterEntries();
-
-    Status addEquality(const BSONElement& e);
-    Status addRegex(RegexMatchExpression* expr);
-
-    const BSONElementSet& equalities() const {
-        return _equalities;
-    }
-    bool contains(const BSONElement& elem) const {
-        return _equalities.count(elem) > 0;
-    }
-
-    size_t numRegexes() const {
-        return _regexes.size();
-    }
-    RegexMatchExpression* regex(int idx) const {
-        return _regexes[idx];
-    }
-
-    bool hasNull() const {
-        return _hasNull;
-    }
-    bool singleNull() const {
-        return size() == 1 && _hasNull;
-    }
-    bool hasEmptyArray() const {
-        return _hasEmptyArray;
-    }
-    int size() const {
-        return _equalities.size() + _regexes.size();
-    }
-
-    const CollatorInterface* getCollator() const {
-        return _collator;
-    }
-
-    bool equivalent(const ArrayFilterEntries& other) const;
-
-    void copyTo(ArrayFilterEntries& toFillIn) const;
-
-    void debugString(StringBuilder& debug) const;
-
-    void serialize(BSONArrayBuilder* out) const;
-
-private:
-    bool _hasNull;  // if _equalities has a jstNULL element in it
-    bool _hasEmptyArray;
-    BSONElementSet _equalities;
-    std::vector<RegexMatchExpression*> _regexes;
-    const CollatorInterface* _collator;
-};
-
-/**
  * query operator: $in
  */
 class InMatchExpression : public LeafMatchExpression {
@@ -379,15 +316,11 @@ public:
     /**
      * 'collator' must outlive the InMatchExpression and any clones made of it.
      */
-    InMatchExpression(const CollatorInterface* collator)
-        : LeafMatchExpression(MATCH_IN), _arrayEntries(collator) {}
+    InMatchExpression(const CollatorInterface* collator);
+
     Status init(StringData path);
 
     virtual std::unique_ptr<MatchExpression> shallowClone() const;
-
-    ArrayFilterEntries* getArrayFilterEntries() {
-        return &_arrayEntries;
-    }
 
     virtual bool matchesSingleElement(const BSONElement& e) const;
 
@@ -397,19 +330,36 @@ public:
 
     virtual bool equivalent(const MatchExpression* other) const;
 
-    void copyTo(InMatchExpression* toFillIn) const;
+    Status addEquality(const BSONElement& elt);
 
-    const ArrayFilterEntries& getData() const {
-        return _arrayEntries;
+    Status addRegex(std::unique_ptr<RegexMatchExpression> expr);
+
+    const BSONElementSet& getEqualities() const {
+        return _equalities;
+    }
+
+    const std::vector<std::unique_ptr<RegexMatchExpression>>& getRegexes() const {
+        return _regexes;
     }
 
     const CollatorInterface* getCollator() const {
-        return _arrayEntries.getCollator();
+        return _collator;
+    }
+
+    bool hasNull() const {
+        return _hasNull;
+    }
+
+    bool hasEmptyArray() const {
+        return _hasEmptyArray;
     }
 
 private:
-    bool _matchesRealElement(const BSONElement& e) const;
-    ArrayFilterEntries _arrayEntries;
+    bool _hasNull = false;        // Whether or not _equalities has a jstNULL element in it.
+    bool _hasEmptyArray = false;  // Whether or not _equalities has an empty array element in it.
+    BSONElementSet _equalities;
+    std::vector<std::unique_ptr<RegexMatchExpression>> _regexes;
+    const CollatorInterface* _collator = nullptr;
 };
 
 //

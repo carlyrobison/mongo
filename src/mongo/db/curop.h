@@ -35,11 +35,9 @@
 #include "mongo/db/operation_context.h"
 #include "mongo/db/server_options.h"
 #include "mongo/platform/atomic_word.h"
-#include "mongo/util/concurrency/spin_lock.h"
-#include "mongo/util/progress_meter.h"
-#include "mongo/util/thread_safe_string.h"
-#include "mongo/util/time_support.h"
 #include "mongo/util/net/message.h"
+#include "mongo/util/progress_meter.h"
+#include "mongo/util/time_support.h"
 
 namespace mongo {
 
@@ -175,6 +173,14 @@ public:
         return _query;
     }
 
+    /**
+     * Returns an owned BSONObj representing the original command. Used only by the getMore
+     * command.
+     */
+    BSONObj originatingCommand() const {
+        return _originatingCommand;
+    }
+
     void enter_inlock(const char* ns, int dbProfileLevel);
 
     /**
@@ -295,6 +301,13 @@ public:
         _query = query;
     }
 
+    /**
+     * Sets the original command object. Used only by the getMore command.
+     */
+    void setOriginatingCommand_inlock(const BSONObj& commandObj) {
+        _originatingCommand = commandObj.getOwned();
+    }
+
     Command* getCommand() const {
         return _command;
     }
@@ -400,6 +413,7 @@ private:
     int _dbprofile{0};  // 0=off, 1=slow, 2=all
     std::string _ns;
     BSONObj _query;
+    BSONObj _originatingCommand;  // Used by getMore to display original command.
     OpDebug _debug;
     std::string _message;
     ProgressMeter _progressMeter;

@@ -39,7 +39,7 @@
 #include "mongo/db/client.h"
 #include "mongo/db/commands.h"
 #include "mongo/db/namespace_string.h"
-#include "mongo/db/query/lite_parsed_query.h"
+#include "mongo/db/query/query_request.h"
 #include "mongo/db/repl/read_concern_args.h"
 #include "mongo/db/service_context_noop.h"
 #include "mongo/executor/network_interface_mock.h"
@@ -169,14 +169,13 @@ void ShardingTestFixture::setUp() {
 
     // For now initialize the global grid object. All sharding objects will be accessible from there
     // until we get rid of it.
-    grid.init(
-        std::move(cm),
-        stdx::make_unique<CatalogCache>(),
-        std::move(shardRegistry),
-        stdx::make_unique<ClusterCursorManager>(_service->getPreciseClockSource()),
-        stdx::make_unique<BalancerConfiguration>(ChunkSizeSettingsType::kDefaultMaxChunkSizeBytes),
-        std::move(executorPool),
-        _mockNetwork);
+    grid.init(std::move(cm),
+              stdx::make_unique<CatalogCache>(),
+              std::move(shardRegistry),
+              stdx::make_unique<ClusterCursorManager>(_service->getPreciseClockSource()),
+              stdx::make_unique<BalancerConfiguration>(),
+              std::move(executorPool),
+              _mockNetwork);
 }
 
 void ShardingTestFixture::tearDown() {
@@ -284,7 +283,7 @@ void ShardingTestFixture::expectGetShards(const std::vector<ShardType>& shards) 
         const NamespaceString nss(request.dbname, request.cmdObj.firstElement().String());
         ASSERT_EQ(nss.toString(), ShardType::ConfigNS);
 
-        auto queryResult = LiteParsedQuery::makeFromFindCommand(nss, request.cmdObj, false);
+        auto queryResult = QueryRequest::makeFromFindCommand(nss, request.cmdObj, false);
         ASSERT_OK(queryResult.getStatus());
 
         const auto& query = queryResult.getValue();
@@ -343,8 +342,9 @@ void ShardingTestFixture::expectConfigCollectionCreate(const HostAndPort& config
         ASSERT_EQUALS(configHost, request.target);
         ASSERT_EQUALS("config", request.dbname);
 
-        BSONObj expectedCreateCmd = BSON("create" << collName << "capped" << true << "size"
-                                                  << cappedSize << "maxTimeMS" << 30000);
+        BSONObj expectedCreateCmd =
+            BSON("create" << collName << "capped" << true << "size" << cappedSize << "maxTimeMS"
+                          << 30000);
         ASSERT_EQUALS(expectedCreateCmd, request.cmdObj);
 
         return response;

@@ -38,8 +38,8 @@
 #include "mongo/s/balancer/balancer_configuration.h"
 #include "mongo/s/catalog/catalog_cache.h"
 #include "mongo/s/catalog/catalog_manager.h"
-#include "mongo/s/client/shard_registry.h"
 #include "mongo/s/client/shard_factory.h"
+#include "mongo/s/client/shard_registry.h"
 #include "mongo/s/query/cluster_cursor_manager.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/log.h"
@@ -79,6 +79,8 @@ void Grid::init(std::unique_ptr<CatalogManager> catalogManager,
     _balancerConfig = std::move(balancerConfig);
     _executorPool = std::move(executorPool);
     _network = network;
+
+    _shardRegistry->startup();
 }
 
 bool Grid::allowLocalHost() const {

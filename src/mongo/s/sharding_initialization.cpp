@@ -47,14 +47,14 @@
 #include "mongo/rpc/metadata/config_server_metadata.h"
 #include "mongo/rpc/metadata/metadata_hook.h"
 #include "mongo/s/balancer/balancer_configuration.h"
-#include "mongo/s/client/shard_factory.h"
-#include "mongo/s/client/shard_registry.h"
-#include "mongo/s/client/sharding_network_connection_hook.h"
-#include "mongo/s/grid.h"
 #include "mongo/s/catalog/catalog_cache.h"
 #include "mongo/s/catalog/replset/catalog_manager_replica_set.h"
 #include "mongo/s/catalog/replset/dist_lock_catalog_impl.h"
 #include "mongo/s/catalog/replset/replset_dist_lock_manager.h"
+#include "mongo/s/client/shard_factory.h"
+#include "mongo/s/client/shard_registry.h"
+#include "mongo/s/client/sharding_network_connection_hook.h"
+#include "mongo/s/grid.h"
 #include "mongo/s/query/cluster_cursor_manager.h"
 #include "mongo/s/sharding_egress_metadata_hook.h"
 #include "mongo/stdx/memory.h"
@@ -129,7 +129,6 @@ std::unique_ptr<TaskExecutorPool> makeTaskExecutorPool(
 }  // namespace
 
 Status initializeGlobalShardingState(const ConnectionString& configCS,
-                                     uint64_t maxChunkSizeBytes,
                                      std::unique_ptr<ShardFactory> shardFactory,
                                      rpc::ShardingEgressMetadataHookBuilder hookBuilder) {
     if (configCS.type() == ConnectionString::INVALID) {
@@ -156,11 +155,11 @@ Status initializeGlobalShardingState(const ConnectionString& configCS,
         stdx::make_unique<CatalogCache>(),
         std::move(shardRegistry),
         stdx::make_unique<ClusterCursorManager>(getGlobalServiceContext()->getPreciseClockSource()),
-        stdx::make_unique<BalancerConfiguration>(maxChunkSizeBytes),
+        stdx::make_unique<BalancerConfiguration>(),
         std::move(executorPool),
         networkPtr);
 
-    Status status = rawCatalogManager->startup();
+    auto status = rawCatalogManager->startup();
     if (!status.isOK()) {
         return status;
     }

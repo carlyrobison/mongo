@@ -32,6 +32,8 @@
 
 #include "mongo/db/query/stage_builder.h"
 
+#include "mongo/db/catalog/collection.h"
+#include "mongo/db/catalog/database.h"
 #include "mongo/db/client.h"
 #include "mongo/db/exec/and_hash.h"
 #include "mongo/db/exec/and_sorted.h"
@@ -48,14 +50,12 @@
 #include "mongo/db/exec/or.h"
 #include "mongo/db/exec/projection.h"
 #include "mongo/db/exec/shard_filter.h"
+#include "mongo/db/exec/skip.h"
 #include "mongo/db/exec/sort.h"
 #include "mongo/db/exec/sort_key_generator.h"
-#include "mongo/db/exec/skip.h"
 #include "mongo/db/exec/text.h"
 #include "mongo/db/index/fts_access_method.h"
 #include "mongo/db/matcher/extensions_callback_real.h"
-#include "mongo/db/catalog/collection.h"
-#include "mongo/db/catalog/database.h"
 #include "mongo/db/s/sharding_state.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/log.h"
@@ -92,11 +92,7 @@ PlanStage* buildStages(OperationContext* txn,
 
         params.descriptor =
             collection->getIndexCatalog()->findIndexByKeyPattern(txn, ixn->indexKeyPattern);
-        if (params.descriptor == NULL) {
-            warning() << "Can't find index " << ixn->indexKeyPattern.toString() << "in namespace "
-                      << collection->ns() << endl;
-            return NULL;
-        }
+        invariant(params.descriptor);
 
         params.bounds = ixn->bounds;
         params.direction = ixn->direction;
@@ -119,7 +115,6 @@ PlanStage* buildStages(OperationContext* txn,
         SortStageParams params;
         params.collection = collection;
         params.pattern = sn->pattern;
-        params.collator = cq.getCollator();
         params.limit = sn->limit;
         return new SortStage(txn, params, ws, childStage);
     } else if (STAGE_SORT_KEY_GENERATOR == root->getType()) {
@@ -129,7 +124,7 @@ PlanStage* buildStages(OperationContext* txn,
             return NULL;
         }
         return new SortKeyGeneratorStage(
-            txn, childStage, ws, keyGenNode->sortSpec, keyGenNode->queryObj);
+            txn, childStage, ws, keyGenNode->sortSpec, keyGenNode->queryObj, cq.getCollator());
     } else if (STAGE_PROJECTION == root->getType()) {
         const ProjectionNode* pn = static_cast<const ProjectionNode*>(root);
         PlanStage* childStage = buildStages(txn, collection, cq, qsol, pn->children[0], ws);
@@ -229,12 +224,7 @@ PlanStage* buildStages(OperationContext* txn,
 
         IndexDescriptor* twoDIndex =
             collection->getIndexCatalog()->findIndexByKeyPattern(txn, node->indexKeyPattern);
-
-        if (twoDIndex == NULL) {
-            warning() << "Can't find 2D index " << node->indexKeyPattern.toString()
-                      << "in namespace " << collection->ns() << endl;
-            return NULL;
-        }
+        invariant(twoDIndex);
 
         GeoNear2DStage* nearStage = new GeoNear2DStage(params, txn, ws, collection, twoDIndex);
 
@@ -251,12 +241,7 @@ PlanStage* buildStages(OperationContext* txn,
 
         IndexDescriptor* s2Index =
             collection->getIndexCatalog()->findIndexByKeyPattern(txn, node->indexKeyPattern);
-
-        if (s2Index == NULL) {
-            warning() << "Can't find 2DSphere index " << node->indexKeyPattern.toString()
-                      << "in namespace " << collection->ns() << endl;
-            return NULL;
-        }
+        invariant(s2Index);
 
         return new GeoNear2DSphereStage(params, txn, ws, collection, s2Index);
     } else if (STAGE_TEXT == root->getType()) {
@@ -307,6 +292,7 @@ PlanStage* buildStages(OperationContext* txn,
 
         params.descriptor =
             collection->getIndexCatalog()->findIndexByKeyPattern(txn, dn->indexKeyPattern);
+        invariant(params.descriptor);
         params.direction = dn->direction;
         params.bounds = dn->bounds;
         params.fieldNo = dn->fieldNo;
@@ -323,6 +309,7 @@ PlanStage* buildStages(OperationContext* txn,
 
         params.descriptor =
             collection->getIndexCatalog()->findIndexByKeyPattern(txn, csn->indexKeyPattern);
+        invariant(params.descriptor);
         params.startKey = csn->startKey;
         params.startKeyInclusive = csn->startKeyInclusive;
         params.endKey = csn->endKey;
@@ -335,7 +322,7 @@ PlanStage* buildStages(OperationContext* txn,
         if (NULL == childStage) {
             return NULL;
         }
-        return new EnsureSortedStage(txn, esn->pattern, cq.getCollator(), ws, childStage);
+        return new EnsureSortedStage(txn, esn->pattern, ws, childStage);
     } else {
         mongoutils::str::stream ss;
         root->appendToString(&ss, 0);

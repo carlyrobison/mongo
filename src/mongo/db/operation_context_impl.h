@@ -42,12 +42,10 @@ public:
                                              unsigned long long progressMeterTotal,
                                              int secondsBetween) override;
 
-    virtual std::string getNS() const override;
-
 private:
     friend class ServiceContextMongoD;
 
-    OperationContextImpl();
+    OperationContextImpl(Client* client, unsigned opId);
 };
 
 }  // namespace mongo

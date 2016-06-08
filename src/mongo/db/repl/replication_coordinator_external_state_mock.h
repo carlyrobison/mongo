@@ -58,9 +58,7 @@ public:
     virtual void startSteadyStateReplication() override;
     virtual void startMasterSlave(OperationContext*);
     virtual void shutdown();
-    virtual Status initializeReplSetStorage(OperationContext* txn,
-                                            const BSONObj& config,
-                                            bool updateReplOpTime);
+    virtual Status initializeReplSetStorage(OperationContext* txn, const BSONObj& config);
     virtual void logTransitionToPrimaryToOplog(OperationContext* txn);
     virtual void forwardSlaveProgress();
     virtual OID ensureMe(OperationContext*);
@@ -88,6 +86,12 @@ public:
     virtual void notifyOplogMetadataWaiters();
     virtual double getElectionTimeoutOffsetLimitFraction() const;
     virtual bool isReadCommittedSupportedByStorageEngine(OperationContext* txn) const;
+    virtual StatusWith<OpTime> multiApply(OperationContext* txn,
+                                          const MultiApplier::Operations& ops,
+                                          MultiApplier::ApplyOperationFn applyOperation) override;
+    virtual void multiSyncApply(const MultiApplier::Operations& ops) override;
+    virtual void multiInitialSyncApply(const MultiApplier::Operations& ops,
+                                       const HostAndPort& source) override;
 
     /**
      * Adds "host" to the list of hosts that this mock will match when responding to "isSelf"

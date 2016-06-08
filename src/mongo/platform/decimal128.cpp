@@ -25,9 +25,12 @@
  *    then also delete it in the license file.
  */
 
-#include "mongo/platform/basic.h"
-#include "mongo/platform/decimal128.h"
 
+#include "mongo/platform/decimal128.h"
+#include "mongo/platform/basic.h"
+
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -43,6 +46,101 @@
 
 #include "mongo/config.h"
 #include "mongo/util/assert_util.h"
+#include "mongo/util/stringutils.h"
+
+namespace {
+void validateInputString(mongo::StringData input, std::uint32_t* signalingFlags) {
+    // Input must be of these forms:
+    // * Valid decimal (standard or scientific notation):
+    //      /[-+]?\d*(.\d+)?([e][+\-]?\d+)?/
+    // * NaN: /[-+]?[[Nn][Aa][Nn]]/
+    // * Infinity: /[+\-]?(inf|infinity)
+
+    bool isSigned = input[0] == '-' || input[0] == '+';
+
+    // Check for NaN and Infinity
+    size_t start = (isSigned) ? 1 : 0;
+    mongo::StringData noSign = input.substr(start);
+    bool isNanOrInf = noSign == "nan" || noSign == "inf" || noSign == "infinity";
+    if (isNanOrInf)
+        return;
+
+    // Input starting with non digit
+    if (!std::isdigit(noSign[0])) {
+        if (noSign[0] != '.') {
+            *signalingFlags = mongo::Decimal128::SignalingFlag::kInvalid;
+            return;
+        } else if (noSign.size() == 1) {
+            *signalingFlags = mongo::Decimal128::SignalingFlag::kInvalid;
+            return;
+        }
+    }
+    bool isZero = true;
+    bool hasCoefficient = false;
+
+    // Check coefficient, i.e. the part before the e
+    int dotCount = 0;
+    size_t i = 0;
+    for (/*i = 0*/; i < noSign.size(); i++) {
+        char c = noSign[i];
+        if (c == '.') {
+            dotCount++;
+            if (dotCount > 1) {
+                *signalingFlags = mongo::Decimal128::SignalingFlag::kInvalid;
+                return;
+            }
+        } else if (!std::isdigit(c)) {
+            break;
+        } else {
+            hasCoefficient = true;
+            if (c != '0') {
+                isZero = false;
+            }
+        }
+    }
+
+    if (isZero) {
+        // Override inexact/overflow flag set by the intel library
+        *signalingFlags = mongo::Decimal128::SignalingFlag::kNoFlag;
+    }
+
+    // Input is valid if we've parsed the entire string
+    if (i == noSign.size()) {
+        return;
+    }
+
+    // String with empty coefficient and non-empty exponent
+    if (!hasCoefficient) {
+        *signalingFlags = mongo::Decimal128::SignalingFlag::kInvalid;
+        return;
+    }
+
+    // Check exponent
+    mongo::StringData exponent = noSign.substr(i);
+
+    if (exponent[0] != 'e' || exponent.size() < 2) {
+        *signalingFlags = mongo::Decimal128::SignalingFlag::kInvalid;
+        return;
+    }
+    if (exponent[1] == '-' || exponent[1] == '+') {
+        exponent = exponent.substr(2);
+        if (exponent.size() == 0) {
+            *signalingFlags = mongo::Decimal128::SignalingFlag::kInvalid;
+            return;
+        }
+    } else {
+        exponent = exponent.substr(1);
+    }
+
+    for (size_t j = 0; j < exponent.size(); j++) {
+        char c = exponent[j];
+        if (!std::isdigit(c)) {
+            *signalingFlags = mongo::Decimal128::SignalingFlag::kInvalid;
+            return;
+        }
+    }
+}
+}  // namespace
 
 namespace mongo {
 
@@ -250,11 +348,19 @@ Decimal128::Decimal128(double doubleValue,
 
 Decimal128::Decimal128(std::string stringValue, RoundingMode roundMode) {
     std::uint32_t throwAwayFlag = 0;
-    std::unique_ptr<char[]> charInput(new char[stringValue.size() + 1]);
-    std::copy(stringValue.begin(), stringValue.end(), charInput.get());
-    charInput[stringValue.size()] = '\0';
+    *this = Decimal128(stringValue, &throwAwayFlag, roundMode);
+}
+
+
+Decimal128::Decimal128(std::string stringValue,
+                       std::uint32_t* signalingFlags,
+                       RoundingMode roundMode) {
+    std::string lower = toAsciiLowerCase(stringValue);
     BID_UINT128 dec128;
-    dec128 = bid128_from_string(charInput.get(), roundMode, &throwAwayFlag);
+    // The intel library function requires a char * while c_str() returns a const char*.
+    // We're using const_cast here since the library function should not modify the input.
+    dec128 = bid128_from_string(const_cast<char*>(lower.c_str()), roundMode, signalingFlags);
+    validateInputString(StringData(lower), signalingFlags);
     _value = libraryTypeToValue(dec128);
 }
 
@@ -398,25 +504,24 @@ std::string Decimal128::toString() const {
      */
     bid128_to_string(decimalCharRepresentation, dec128, &idec_signaling_flags);
 
-    std::string dec128String(decimalCharRepresentation);
+    StringData dec128String(decimalCharRepresentation);
 
-    std::string::size_type ePos = dec128String.find("E");
+    int ePos = dec128String.find("E");
 
     // Calculate the precision and exponent of the number and output it in a readable manner
     int precision = 0;
     int exponent = 0;
-    int stringReadPosition = 0;
 
-    std::string exponentString = dec128String.substr(ePos);
+    StringData exponentString = dec128String.substr(ePos);
 
     // Get the value of the exponent, start at 2 to ignore the E and the sign
-    for (std::string::size_type i = 2; i < exponentString.size(); ++i) {
+    for (size_t i = 2; i < exponentString.size(); ++i) {
         exponent = exponent * 10 + (exponentString[i] - '0');
     }
     if (exponentString[1] == '-') {
         exponent *= -1;
     }
-    // Get the total precision of the number
+    // Get the total precision of the number, i.e. the length of the coefficient
     precision = dec128String.size() - exponentString.size() - 1 /* mantissa sign */;
 
     std::string result;
@@ -424,53 +529,67 @@ std::string Decimal128::toString() const {
     // For formatting, leave off the sign if it is positive
     if (dec128String[0] == '-')
         result = "-";
-    stringReadPosition++;
 
-    int scientificExponent = precision - 1 + exponent;
+    StringData coefficient = dec128String.substr(1, precision);
+    int adjustedExponent = exponent + precision - 1;
 
-    // If the number is significantly large, small, or the user has specified an exponent
-    // such that converting to string would need to append trailing zeros, display the
-    // number in scientific notation
-    if (scientificExponent >= 12 || scientificExponent <= -4 || exponent > 0) {
-        // Output in scientific format
-        result += dec128String.substr(stringReadPosition, 1);
-        stringReadPosition++;
-        precision--;
-        if (precision)
-            result += ".";
-        result += dec128String.substr(stringReadPosition, precision);
-        // Add the exponent
-        result += "E";
-        if (scientificExponent > 0)
-            result += "+";
-        result += std::to_string(scientificExponent);
+    if (exponent > 0 || adjustedExponent < -6) {
+        result += _convertToScientificNotation(coefficient, adjustedExponent);
     } else {
-        // Regular format with no decimal place
-        if (exponent >= 0) {
-            result += dec128String.substr(stringReadPosition, precision);
-            stringReadPosition += precision;
-        } else {
-            int radixPosition = precision + exponent;
-            if (radixPosition > 0) {
-                // Non-zero digits before radix point
-                result += dec128String.substr(stringReadPosition, radixPosition);
-                stringReadPosition += radixPosition;
-            } else {
-                // Leading zero before radix point
-                result += "0";
-            }
-
-            result += ".";
-            // Leading zeros after radix point
-            while (radixPosition++ < 0)
-                result += "0";
-
-            result +=
-                dec128String.substr(stringReadPosition, precision - std::max(radixPosition - 1, 0));
-        }
+        result += _convertToStandardDecimalNotation(coefficient, exponent);
     }
 
     return result;
+}
+
+std::string Decimal128::_convertToScientificNotation(StringData coefficient,
+                                                     int adjustedExponent) const {
+    int cLength = coefficient.size();
+    std::string result;
+    for (int i = 0; i < cLength; i++) {
+        result += coefficient[i];
+        if (i == 0 && cLength > 1) {
+            result += '.';
+        }
+    }
+    result += 'E';
+    if (adjustedExponent > 0) {
+        result += '+';
+    }
+    result += std::to_string(adjustedExponent);
+    return result;
+}
+
+std::string Decimal128::_convertToStandardDecimalNotation(StringData coefficient,
+                                                          int exponent) const {
+    if (exponent == 0) {
+        return coefficient.toString();
+    } else {
+        invariant(exponent < 0);
+        std::string result;
+        int precision = coefficient.size();
+        // Absolute value of the exponent
+        int significantDecimalDigits = -exponent;
+        bool decimalAppended = false;
+
+        // Pre-pend 0's before the coefficient as necessary
+        for (int i = precision; i <= significantDecimalDigits; i++) {
+            result += '0';
+            if (i == precision) {
+                result += '.';
+                decimalAppended = true;
+            }
+        }
+
+        // Copy over the digits in the coefficient
+        for (int i = 0; i < precision; i++) {
+            if (precision - i == significantDecimalDigits && !decimalAppended) {
+                result += '.';
+            }
+            result += coefficient[i];
+        }
+        return result;
+    }
 }
 
 bool Decimal128::isZero() const {
@@ -557,6 +676,83 @@ Decimal128 Decimal128::divide(const Decimal128& other,
     return result;
 }
 
+Decimal128 Decimal128::exponential(RoundingMode roundMode) const {
+    std::uint32_t throwAwayFlag = 0;
+    return exponential(&throwAwayFlag);
+}
+
+Decimal128 Decimal128::exponential(std::uint32_t* signalingFlags, RoundingMode roundMode) const {
+    BID_UINT128 current = decimal128ToLibraryType(_value);
+    current = bid128_exp(current, roundMode, signalingFlags);
+    return Decimal128{libraryTypeToValue(current)};
+}
+
+Decimal128 Decimal128::logarithm(RoundingMode roundMode) const {
+    std::uint32_t throwAwayFlag = 0;
+    return logarithm(&throwAwayFlag);
+}
+
+Decimal128 Decimal128::logarithm(std::uint32_t* signalingFlags, RoundingMode roundMode) const {
+    BID_UINT128 current = decimal128ToLibraryType(_value);
+    current = bid128_log(current, roundMode, signalingFlags);
+    return Decimal128{libraryTypeToValue(current)};
+}
+
+Decimal128 Decimal128::logarithm(const Decimal128& other, RoundingMode roundMode) const {
+    std::uint32_t throwAwayFlag = 0;
+    if (other.isEqual(Decimal128(2))) {
+        BID_UINT128 current = decimal128ToLibraryType(_value);
+        current = bid128_log2(current, roundMode, &throwAwayFlag);
+        return Decimal128{libraryTypeToValue(current)};
+    }
+    if (other.isEqual(Decimal128(10))) {
+        BID_UINT128 current = decimal128ToLibraryType(_value);
+        current = bid128_log10(current, roundMode, &throwAwayFlag);
+        return Decimal128{libraryTypeToValue(current)};
+    }
+    return logarithm(other, &throwAwayFlag);
+}
+
+Decimal128 Decimal128::logarithm(const Decimal128& other,
+                                 std::uint32_t* signalingFlags,
+                                 RoundingMode roundMode) const {
+    return logarithm(signalingFlags, roundMode).divide(other);
+}
+
+Decimal128 Decimal128::modulo(const Decimal128& other) const {
+    std::uint32_t throwAwayFlag = 0;
+    return modulo(other, &throwAwayFlag);
+}
+
+Decimal128 Decimal128::modulo(const Decimal128& other, std::uint32_t* signalingFlags) const {
+    BID_UINT128 current = decimal128ToLibraryType(_value);
+    BID_UINT128 divisor = decimal128ToLibraryType(other.getValue());
+    current = bid128_fmod(current, divisor, signalingFlags);
+    return Decimal128{libraryTypeToValue(current)};
+}
+
+Decimal128 Decimal128::power(const Decimal128& other, RoundingMode roundMode) const {
+    std::uint32_t throwAwayFlag = 0;
+    return power(other, &throwAwayFlag, roundMode);
+}
+
+Decimal128 Decimal128::power(const Decimal128& other,
+                             std::uint32_t* signalingFlags,
+                             RoundingMode roundMode) const {
+    BID_UINT128 base = decimal128ToLibraryType(_value);
+    BID_UINT128 exp = decimal128ToLibraryType(other.getValue());
+
+
+    BID_UINT128 result;
+    if (this->isEqual(Decimal128(10)))
+        result = bid128_exp10(exp, roundMode, signalingFlags);
+    else if (this->isEqual(Decimal128(2)))
+        result = bid128_exp2(exp, roundMode, signalingFlags);
+    else
+        result = bid128_pow(base, exp, roundMode, signalingFlags);
+    return Decimal128{libraryTypeToValue(result)}.add(kLargestNegativeExponentZero);
+}
+
 Decimal128 Decimal128::quantize(const Decimal128& other, RoundingMode roundMode) const {
     std::uint32_t throwAwayFlag = 0;
     return quantize(other, &throwAwayFlag, roundMode);
@@ -571,6 +767,17 @@ Decimal128 Decimal128::quantize(const Decimal128& reference,
     Decimal128::Value value = libraryTypeToValue(quantizedResult);
     Decimal128 result(value);
     return result;
+}
+
+Decimal128 Decimal128::squareRoot(RoundingMode roundMode) const {
+    std::uint32_t throwAwayFlag = 0;
+    return exponential(&throwAwayFlag);
+}
+
+Decimal128 Decimal128::squareRoot(std::uint32_t* signalingFlags, RoundingMode roundMode) const {
+    BID_UINT128 current = decimal128ToLibraryType(_value);
+    current = bid128_sqrt(current, roundMode, signalingFlags);
+    return Decimal128{libraryTypeToValue(current)};
 }
 
 bool Decimal128::isEqual(const Decimal128& other) const {

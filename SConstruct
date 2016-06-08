@@ -474,6 +474,13 @@ add_option('modules',
     help="Comma-separated list of modules to build. Empty means none. Default is all.",
 )
 
+add_option('runtime-hardening',
+    choices=["on", "off"],
+    default="off",
+    help="Enable runtime hardening features (e.g. stack smash protection)",
+    type='choice',
+)
+
 try:
     with open("version.json", "r") as version_fp:
         version_data = json.load(version_fp)
@@ -1487,11 +1494,14 @@ if env.TargetOSIs('posix'):
     else:
         env.Append( CCFLAGS=["-O0"] )
 
-    if debugBuild:
-        if not optBuild:
-            env.Append( CCFLAGS=["-fstack-protector"] )
-            env.Append( LINKFLAGS=["-fstack-protector"] )
-            env.Append( SHLINKFLAGS=["-fstack-protector"] )
+    # Promote linker warnings into errors. We can't yet do this on OS X because its linker considers
+    # noall_load obsolete and warns about it.
+    if not env.TargetOSIs('osx'):
+        env.Append(
+            LINKFLAGS=[
+                "-Wl,--fatal-warnings",
+            ],
+        )
 
 mmapv1 = False
 if get_option('mmapv1') == 'auto':
@@ -1796,6 +1806,49 @@ def doConfigure(myenv):
         # TODO: re-evaluate when we move to GCC 5.3
         # see: http://stackoverflow.com/questions/21755206/how-to-get-around-gcc-void-b-4-may-be-used-uninitialized-in-this-funct
         AddToCXXFLAGSIfSupported(myenv, "-Wno-maybe-uninitialized")
+
+    if get_option('runtime-hardening') == "on":
+        # Clang honors these flags, but doesn't actually do anything with them for compatibility, so we
+        # need to only do this for GCC. On clang, we do things differently. Note that we need to add
+        # these to the LINKFLAGS as well, since otherwise we might not link libssp when we need to (see
+        # SERVER-12456).
+        if myenv.ToolchainIs('gcc'):
+            if AddToCCFLAGSIfSupported(myenv, '-fstack-protector-strong'):
+                myenv.Append(
+                    LINKFLAGS=[
+                        '-fstack-protector-strong',
+                    ]
+                )
+            elif AddToCCFLAGSIfSupported(myenv, '-fstack-protector-all'):
+                myenv.Append(
+                    LINKFLAGS=[
+                        '-fstack-protector-all',
+                    ]
+                )
+        elif myenv.ToolchainIs('clang'):
+            # TODO: Clang stack hardening. There are several interesting
+            # things to try here, but they each have consequences we need
+            # to investigate.
+            #
+            # - fsanitize=bounds: This does static bounds checking. We can
+            #   probably turn this on along with fsanitize-trap so that we
+            #   don't depend on the ASAN runtime.
+            #
+            # - fsanitize=safestack: This looks very interesting, and is
+            #   probably what we want. However there are a few problems:
+            #
+            #   - It relies on having the RT library available, and it is
+            #     unclear whether we can ship binaries that depend on
+            #     that.
+            #
+            #   - It is incompatible with a shared object build.
+            #
+            #   - It may not work with SpiderMonkey due to needing to
+            #     inform the GC about the stacks so that mark-sweep
+            #
+            # - fsanitize=cfi: Again, very interesting, however it
+            #   requires LTO builds.
+            pass
 
     # Check if we need to disable null-conversion warnings
     if myenv.ToolchainIs('clang'):
@@ -2218,6 +2271,43 @@ def doConfigure(myenv):
                     "but selected compiler does not honor -flto" )
         else:
             myenv.ConfError("Don't know how to enable --lto on current toolchain")
+
+    if get_option('runtime-hardening') == "on":
+        # Older glibc doesn't work well with _FORTIFY_SOURCE=2. Selecting 2.11 as the minimum was an
+        # emperical decision, as that is the oldest non-broken glibc we seem to require. It is possible
+        # that older glibc's work, but we aren't trying.
+        #
+        # https://gforge.inria.fr/tracker/?func=detail&group_id=131&atid=607&aid=14070
+        # https://github.com/jedisct1/libsodium/issues/202
+        def CheckForGlibcKnownToSupportFortify(context):
+            test_body="""
+            #include <features.h>
+            #if !__GLIBC_PREREQ(2, 11)
+            #error
+            #endif
+            """
+            context.Message('Checking for glibc with non-broken _FORTIFY_SOURCE...')
+            ret = context.TryCompile(textwrap.dedent(test_body), ".c")
+            context.Result(ret)
+            return ret
+
+        conf = Configure(myenv, help=False, custom_tests = {
+            'CheckForFortify': CheckForGlibcKnownToSupportFortify,
+        })
+
+        # Fortify only possibly makes sense on POSIX systems, and we know that clang is not a valid
+        # combination:
+        #
+        # http://lists.llvm.org/pipermail/cfe-dev/2015-November/045852.html
+        #
+        if env.TargetOSIs('posix') and not env.ToolchainIs('clang') and conf.CheckForFortify():
+            conf.env.Append(
+                CPPDEFINES=[
+                    ('_FORTIFY_SOURCE', 2),
+                ],
+            )
+
+        myenv = conf.Finish()
 
     # We set this to work around https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43052
     if not myenv.ToolchainIs('msvc'):

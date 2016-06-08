@@ -43,6 +43,7 @@
 #include "mongo/db/s/sharded_connection_info.h"
 #include "mongo/db/s/sharding_state.h"
 #include "mongo/db/s/type_shard_identity.h"
+#include "mongo/db/server_options.h"
 #include "mongo/s/chunk_version.h"
 #include "mongo/s/stale_exception.h"
 
@@ -131,11 +132,11 @@ void CollectionShardingState::checkShardVersionOrThrow(OperationContext* txn) co
     ChunkVersion received;
     ChunkVersion wanted;
     if (!_checkShardVersionOk(txn, &errmsg, &received, &wanted)) {
-        throw SendStaleConfigException(_nss.ns(),
-                                       str::stream() << "[" << _nss.ns()
-                                                     << "] shard version not ok: " << errmsg,
-                                       received,
-                                       wanted);
+        throw SendStaleConfigException(
+            _nss.ns(),
+            str::stream() << "[" << _nss.ns() << "] shard version not ok: " << errmsg,
+            received,
+            wanted);
     }
 }
 
@@ -246,8 +247,8 @@ bool CollectionShardingState::_checkShardVersionOk(OperationContext* txn,
 
         // Set migration critical section on operation sharding state: operation will wait for the
         // migration to finish before returning failure and retrying.
-        OperationShardingState::get(txn)
-            .setMigrationCriticalSection(_sourceMgr->getMigrationCriticalSection());
+        OperationShardingState::get(txn).setMigrationCriticalSection(
+            _sourceMgr->getMigrationCriticalSection());
         return false;
     }
 

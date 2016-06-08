@@ -33,9 +33,9 @@
 
 #include "mongo/db/repl/sync_tail.h"
 
+#include "third_party/murmurhash3/MurmurHash3.h"
 #include <boost/functional/hash.hpp>
 #include <memory>
-#include "third_party/murmurhash3/MurmurHash3.h"
 
 #include "mongo/base/counter.h"
 #include "mongo/db/auth/authorization_session.h"
@@ -52,6 +52,7 @@
 #include "mongo/db/db_raii.h"
 #include "mongo/db/dbhelpers.h"
 #include "mongo/db/global_timestamp.h"
+#include "mongo/db/namespace_string.h"
 #include "mongo/db/prefetch.h"
 #include "mongo/db/query/query_knobs.h"
 #include "mongo/db/repl/bgsync.h"
@@ -65,6 +66,7 @@
 #include "mongo/db/server_parameters.h"
 #include "mongo/db/service_context.h"
 #include "mongo/db/stats/timer_stats.h"
+#include "mongo/stdx/memory.h"
 #include "mongo/util/exit.h"
 #include "mongo/util/fail_point_service.h"
 #include "mongo/util/log.h"
@@ -77,24 +79,28 @@ namespace mongo {
 using std::endl;
 
 namespace repl {
+
+/**
+ * This variable determines the number of writer threads SyncTail will have. It has a default
+ * value, which varies based on architecture and can be overridden using the
+ * "replWriterThreadCount" server parameter.
+ */
+namespace {
 #if defined(MONGO_PLATFORM_64)
-int SyncTail::replWriterThreadCount = 16;
-const int replPrefetcherThreadCount = 16;
+int replWriterThreadCount = 16;
 #elif defined(MONGO_PLATFORM_32)
-int SyncTail::replWriterThreadCount = 2;
-const int replPrefetcherThreadCount = 2;
+int replWriterThreadCount = 2;
 #else
 #error need to include something that defines MONGO_PLATFORM_XX
 #endif
+}  // namespace
 
 class ExportedWriterThreadCountParameter
     : public ExportedServerParameter<int, ServerParameterType::kStartupOnly> {
 public:
     ExportedWriterThreadCountParameter()
         : ExportedServerParameter<int, ServerParameterType::kStartupOnly>(
-              ServerParameterSet::getGlobal(),
-              "replWriterThreadCount",
-              &SyncTail::replWriterThreadCount) {}
+              ServerParameterSet::getGlobal(), "replWriterThreadCount", &replWriterThreadCount) {}
 
     virtual Status validate(const int& potentialNewValue) {
         if (potentialNewValue < 1 || potentialNewValue > 256) {
@@ -275,13 +281,19 @@ void ApplyBatchFinalizerForJournal::_run() {
 }
 }  // anonymous namespace containing ApplyBatchFinalizer definitions.
 
-SyncTail::SyncTail(BackgroundSyncInterface* q, MultiSyncApplyFunc func)
-    : _networkQueue(q),
-      _applyFunc(func),
-      _writerPool(replWriterThreadCount, "repl writer worker "),
-      _prefetcherPool(replPrefetcherThreadCount, "repl prefetch worker ") {}
+SyncTail::SyncTail(BackgroundSync* q, MultiSyncApplyFunc func)
+    : SyncTail(q, func, makeWriterPool()) {}
+
+SyncTail::SyncTail(BackgroundSync* q,
+                   MultiSyncApplyFunc func,
+                   std::unique_ptr<OldThreadPool> writerPool)
+    : _networkQueue(q), _applyFunc(func), _writerPool(std::move(writerPool)) {}
 
 SyncTail::~SyncTail() {}
+
+std::unique_ptr<OldThreadPool> SyncTail::makeWriterPool() {
+    return stdx::make_unique<OldThreadPool>(replWriterThreadCount, "repl writer worker ");
+}
 
 bool SyncTail::peek(BSONObj* op) {
     return _networkQueue->peek(op);
@@ -534,6 +546,7 @@ OpTime SyncTail::multiApply(OperationContext* txn, const OpQueue& ops) {
     auto applyOperation = [this](const MultiApplier::Operations& ops) { _applyFunc(ops, this); };
     auto status =
         repl::multiApply(txn,
+                         _writerPool.get(),
                          MultiApplier::Operations(convertToVector.begin(), convertToVector.end()),
                          applyOperation);
     if (!status.isOK()) {
@@ -706,7 +719,7 @@ void SyncTail::oplogApplication() {
         OpQueue ops;
 
         do {
-            if (BackgroundSync::get()->getInitialSyncRequestedFlag()) {
+            if (replCoord->getInitialSyncRequestedFlag()) {
                 // got a resync command
                 return;
             }
@@ -749,7 +762,8 @@ void SyncTail::oplogApplication() {
                            str::stream() << "Attempted to apply an oplog entry ("
                                          << lastOpTime.toString()
                                          << ") which is not greater than our lastWrittenOptime ("
-                                         << lastWriteOpTime.toString() << ")."));
+                                         << lastWriteOpTime.toString()
+                                         << ")."));
         }
 
         handleSlaveDelay(lastOpTime.getTimestamp());
@@ -863,6 +877,10 @@ bool SyncTail::tryPopAndWaitForMore(OperationContext* txn, SyncTail::OpQueue* op
 
 void SyncTail::setHostname(const std::string& hostname) {
     _hostname = hostname;
+}
+
+OldThreadPool* SyncTail::getWriterPool() {
+    return _writerPool.get();
 }
 
 BSONObj SyncTail::getMissingDoc(OperationContext* txn, Database* db, const BSONObj& o) {
@@ -988,8 +1006,24 @@ static void initializeWriterThread() {
 
 // This free function is used by the writer threads to apply each op
 void multiSyncApply(const std::vector<OplogEntry>& ops, SyncTail*) {
-    std::vector<OplogEntry> oplogEntries(ops.begin(), ops.end());
-    std::vector<OplogEntry*> oplogEntryPointers(oplogEntries.size());
+    initializeWriterThread();
+    auto txn = cc().makeOperationContext();
+    auto syncApply = [](OperationContext* txn, const BSONObj& op, bool convertUpdateToUpsert) {
+        return SyncTail::syncApply(txn, op, convertUpdateToUpsert);
+    };
+    fassertNoTrace(16359, multiSyncApply_noAbort(txn.get(), ops, syncApply));
+}
+
+Status multiSyncApply_noAbort(OperationContext* txn,
+                              const std::vector<OplogEntry>& oplogEntries,
+                              SyncApplyFn syncApply) {
+    txn->setReplicatedWrites(false);
+    DisableDocumentValidation validationDisabler(txn);
+
+    // allow us to get through the magic barrier
+    txn->lockState()->setIsBatchWriter(true);
+
+    std::vector<const OplogEntry*> oplogEntryPointers(oplogEntries.size());
     for (size_t i = 0; i < oplogEntries.size(); i++) {
         oplogEntryPointers[i] = &oplogEntries[i];
     }
@@ -997,27 +1031,18 @@ void multiSyncApply(const std::vector<OplogEntry>& ops, SyncTail*) {
     if (oplogEntryPointers.size() > 1) {
         std::stable_sort(oplogEntryPointers.begin(),
                          oplogEntryPointers.end(),
-                         [](OplogEntry* l, OplogEntry* r) { return l->ns < r->ns; });
+                         [](const OplogEntry* l, const OplogEntry* r) { return l->ns < r->ns; });
     }
-    initializeWriterThread();
-
-    const ServiceContext::UniqueOperationContext txnPtr = cc().makeOperationContext();
-    OperationContext& txn = *txnPtr;
-    txn.setReplicatedWrites(false);
-    DisableDocumentValidation validationDisabler(&txn);
-
-    // allow us to get through the magic barrier
-    txn.lockState()->setIsBatchWriter(true);
 
     bool convertUpdatesToUpserts = true;
     // doNotGroupBeforePoint is used to prevent retrying bad group inserts by marking the final op
     // of a failed group and not allowing further group inserts until that op has been processed.
-    std::vector<OplogEntry*>::iterator doNotGroupBeforePoint = oplogEntryPointers.begin();
+    auto doNotGroupBeforePoint = oplogEntryPointers.begin();
 
-    for (std::vector<OplogEntry*>::iterator oplogEntriesIterator = oplogEntryPointers.begin();
+    for (auto oplogEntriesIterator = oplogEntryPointers.begin();
          oplogEntriesIterator != oplogEntryPointers.end();
          ++oplogEntriesIterator) {
-        OplogEntry* entry = *oplogEntriesIterator;
+        auto entry = *oplogEntriesIterator;
         if (entry->opType[0] == 'i' && !entry->isForCappedCollection &&
             oplogEntriesIterator > doNotGroupBeforePoint) {
             // Attempt to group inserts if possible.
@@ -1027,7 +1052,7 @@ void multiSyncApply(const std::vector<OplogEntry>& ops, SyncTail*) {
             auto endOfGroupableOpsIterator = std::find_if(
                 oplogEntriesIterator + 1,
                 oplogEntryPointers.end(),
-                [&](OplogEntry* nextEntry) {
+                [&](const OplogEntry* nextEntry) {
                     return nextEntry->opType[0] != 'i' ||  // Must be an insert.
                         nextEntry->ns != entry->ns ||      // Must be the same namespace.
                         // Must not create too large an object.
@@ -1048,7 +1073,7 @@ void multiSyncApply(const std::vector<OplogEntry>& ops, SyncTail*) {
 
                 // Populate the "o" field with all the groupable inserts.
                 BSONArrayBuilder insertArrayBuilder(groupedInsertBuilder.subarrayStart("o"));
-                for (std::vector<OplogEntry*>::iterator groupingIterator = oplogEntriesIterator;
+                for (auto groupingIterator = oplogEntriesIterator;
                      groupingIterator != endOfGroupableOpsIterator;
                      ++groupingIterator) {
                     insertArrayBuilder.append((*groupingIterator)->o.Obj());
@@ -1057,8 +1082,8 @@ void multiSyncApply(const std::vector<OplogEntry>& ops, SyncTail*) {
 
                 try {
                     // Apply the group of inserts.
-                    uassertStatusOK(SyncTail::syncApply(
-                        &txn, groupedInsertBuilder.done(), convertUpdatesToUpserts));
+                    uassertStatusOK(
+                        syncApply(txn, groupedInsertBuilder.done(), convertUpdatesToUpserts));
                     // It succeeded, advance the oplogEntriesIterator to the end of the
                     // group of inserts.
                     oplogEntriesIterator = endOfGroupableOpsIterator - 1;
@@ -1066,11 +1091,12 @@ void multiSyncApply(const std::vector<OplogEntry>& ops, SyncTail*) {
                 } catch (const DBException& e) {
                     // The group insert failed, log an error and fall through to the
                     // application of an individual op.
-                    error() << "Error applying inserts in bulk " << causedBy(e)
-                            << " trying first insert as a lone insert";
-
+                    str::stream msg;
+                    msg << "Error applying inserts in bulk " << causedBy(e)
+                        << " trying first insert as a lone insert";
+                    error() << std::string(msg);
                     if (inShutdown()) {
-                        return;
+                        return {ErrorCodes::InterruptedAtShutdown, msg};
                     }
 
                     // Avoid quadratic run time from failed insert by not retrying until we
@@ -1082,52 +1108,57 @@ void multiSyncApply(const std::vector<OplogEntry>& ops, SyncTail*) {
 
         try {
             // Apply an individual (non-grouped) op.
-            const Status s = SyncTail::syncApply(&txn, entry->raw, convertUpdatesToUpserts);
+            const Status s = syncApply(txn, entry->raw, convertUpdatesToUpserts);
 
             if (!s.isOK()) {
                 severe() << "Error applying operation (" << entry->raw.toString() << "): " << s;
                 if (inShutdown()) {
-                    return;
+                    return {ErrorCodes::InterruptedAtShutdown, s.toString()};
                 }
-                fassertFailedNoTrace(16359);
+                return s;
             }
         } catch (const DBException& e) {
             severe() << "writer worker caught exception: " << causedBy(e)
                      << " on: " << entry->raw.toString();
 
             if (inShutdown()) {
-                return;
+                return {ErrorCodes::InterruptedAtShutdown, e.toString()};
             }
 
-            fassertFailedNoTrace(16360);
+            return e.toStatus();
         }
     }
+
+    return Status::OK();
 }
 
 // This free function is used by the initial sync writer threads to apply each op
 void multiInitialSyncApply(const std::vector<OplogEntry>& ops, SyncTail* st) {
     initializeWriterThread();
+    auto txn = cc().makeOperationContext();
+    fassertNoTrace(15915, multiInitialSyncApply_noAbort(txn.get(), ops, st));
+}
 
-    const ServiceContext::UniqueOperationContext txnPtr = cc().makeOperationContext();
-    OperationContext& txn = *txnPtr;
-    txn.setReplicatedWrites(false);
-    DisableDocumentValidation validationDisabler(&txn);
+Status multiInitialSyncApply_noAbort(OperationContext* txn,
+                                     const std::vector<OplogEntry>& ops,
+                                     SyncTail* st) {
+    txn->setReplicatedWrites(false);
+    DisableDocumentValidation validationDisabler(txn);
 
     // allow us to get through the magic barrier
-    txn.lockState()->setIsBatchWriter(true);
+    txn->lockState()->setIsBatchWriter(true);
 
     bool convertUpdatesToUpserts = false;
 
     for (std::vector<OplogEntry>::const_iterator it = ops.begin(); it != ops.end(); ++it) {
         try {
-            const Status s = SyncTail::syncApply(&txn, it->raw, convertUpdatesToUpserts);
+            const Status s = SyncTail::syncApply(txn, it->raw, convertUpdatesToUpserts);
             if (!s.isOK()) {
-                if (st->shouldRetry(&txn, it->raw)) {
-                    const Status s2 = SyncTail::syncApply(&txn, it->raw, convertUpdatesToUpserts);
+                if (st->shouldRetry(txn, it->raw)) {
+                    const Status s2 = SyncTail::syncApply(txn, it->raw, convertUpdatesToUpserts);
                     if (!s2.isOK()) {
-                        severe() << "Error applying operation (" << it->raw.toString()
-                                 << "): " << s2;
-                        fassertFailedNoTrace(15915);
+                        severe() << "Error applying operation (" << it->raw << "): " << s2;
+                        return s2;
                     }
                 }
 
@@ -1136,31 +1167,45 @@ void multiInitialSyncApply(const std::vector<OplogEntry>& ops, SyncTail* st) {
                 // subsequently got deleted and no longer exists on the Sync Target at all
             }
         } catch (const DBException& e) {
-            severe() << "writer worker caught exception: " << causedBy(e)
-                     << " on: " << it->raw.toString();
+            severe() << "writer worker caught exception: " << causedBy(e) << " on: " << it->raw;
 
             if (inShutdown()) {
-                return;
+                return {ErrorCodes::InterruptedAtShutdown, e.toString()};
             }
 
-            fassertFailedNoTrace(16361);
+            return e.toStatus();
         }
     }
+
+    return Status::OK();
 }
 
 StatusWith<OpTime> multiApply(OperationContext* txn,
+                              OldThreadPool* workerPool,
                               const MultiApplier::Operations& ops,
                               MultiApplier::ApplyOperationFn applyOperation) {
-    invariant(applyOperation);
+    if (!txn) {
+        return {ErrorCodes::BadValue, "invalid operation context"};
+    }
 
-    OldThreadPool workerPool(MultiApplier::kReplWriterThreadCount, "repl writer worker ");
+    if (!workerPool) {
+        return {ErrorCodes::BadValue, "invalid worker pool"};
+    }
+
+    if (ops.empty()) {
+        return {ErrorCodes::EmptyArrayOperation, "no operations provided to multiApply"};
+    }
+
+    if (!applyOperation) {
+        return {ErrorCodes::BadValue, "invalid apply operation function"};
+    }
 
     if (getGlobalServiceContext()->getGlobalStorageEngine()->isMmapV1()) {
         // Use a ThreadPool to prefetch all the operations in a batch.
-        prefetchOps(ops, &workerPool);
+        prefetchOps(ops, workerPool);
     }
 
-    std::vector<std::vector<OplogEntry>> writerVectors(MultiApplier::kReplWriterThreadCount);
+    std::vector<std::vector<OplogEntry>> writerVectors(workerPool->getNumThreads());
 
     fillWriterVectors(txn, ops, &writerVectors);
     LOG(2) << "replication batch size is " << ops.size();
@@ -1179,17 +1224,14 @@ StatusWith<OpTime> multiApply(OperationContext* txn,
                 "attempting to replicate ops while primary"};
     }
 
-    applyOps(writerVectors, &workerPool, applyOperation);
+    applyOps(writerVectors, workerPool, applyOperation);
 
     OpTime lastOpTime;
     {
-        ON_BLOCK_EXIT([&] { workerPool.join(); });
-        std::vector<BSONObj> raws;
-        raws.reserve(ops.size());
-        for (auto&& op : ops) {
-            raws.emplace_back(op.raw);
-        }
-        lastOpTime = writeOpsToOplog(txn, raws);
+        ON_BLOCK_EXIT([&] { workerPool->join(); });
+        lastOpTime = fassertStatusOK(
+            40141,
+            StorageInterface::get(txn)->writeOpsToOplog(txn, NamespaceString(rsOplogName), ops));
     }
 
     if (inShutdownStrict()) {
