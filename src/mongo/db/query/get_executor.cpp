@@ -1184,15 +1184,9 @@ BSONObj getDistinctProjection(const std::string& field) {
 StatusWith<unique_ptr<PlanExecutor>> getExecutorCount(OperationContext* txn,
                                                       Collection* collection,
                                                       const CountRequest& request,
-                                                      bool explain,
+                                                      std::unique_ptr<QueryRequest> qr,
                                                       PlanExecutor::YieldPolicy yieldPolicy) {
     unique_ptr<WorkingSet> ws = make_unique<WorkingSet>();
-
-    auto qr = stdx::make_unique<QueryRequest>(request.getNs());
-    qr->setFilter(request.getQuery());
-    qr->setCollation(request.getCollation());
-    qr->setHint(request.getHint());
-    qr->setExplain(explain);
 
     auto statusWithCQ = CanonicalQuery::canonicalize(
         txn,

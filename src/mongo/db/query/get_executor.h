@@ -126,7 +126,7 @@ StatusWith<std::unique_ptr<PlanExecutor>> getExecutorDistinct(
 StatusWith<std::unique_ptr<PlanExecutor>> getExecutorCount(OperationContext* txn,
                                                            Collection* collection,
                                                            const CountRequest& request,
-                                                           bool explain,
+                                                           std::unique_ptr<QueryRequest> qr,
                                                            PlanExecutor::YieldPolicy yieldPolicy);
 
 /**

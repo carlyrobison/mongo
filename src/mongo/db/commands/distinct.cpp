@@ -75,24 +75,24 @@ const char kKeyField[] = "key";
 const char kQueryField[] = "query";
 const char kCollationField[] = "collation";
 
-bool isValidQuery(const BSONObj& o) {
-    // log() << "Query: " << o.jsonString();
-    for (BSONElement e : o) {
-        // log() << "Element: " << e;
-        if (e.type() == Object || e.type() == Array) {
-            if (!isValidQuery(e.Obj())) {
-                return false;
-            }
-        } else {
-            StringData fieldName = e.fieldNameStringData();
-            if (fieldName == "$where" || fieldName == "$elemMatch" || fieldName == "geo" ||
-                fieldName == "loc") {
-                return false;
-            }
-        }
-    }
-    return true;
-}
+// bool isValidQuery(const BSONObj& o) {
+//     // log() << "Query: " << o.jsonString();
+//     for (BSONElement e : o) {
+//         // log() << "Element: " << e;
+//         if (e.type() == Object || e.type() == Array) {
+//             if (!isValidQuery(e.Obj())) {
+//                 return false;
+//             }
+//         } else {
+//             StringData fieldName = e.fieldNameStringData();
+//             if (fieldName == "$where" || fieldName == "$elemMatch" || fieldName == "geo" ||
+//                 fieldName == "loc") {
+//                 return false;
+//             }
+//         }
+//     }
+//     return true;
+// }
 
 BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     log() << cmd.jsonString();
@@ -112,9 +112,9 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     if (cmd.hasField("query")) {
         BSONObj value = cmd.getObjectField("query");
         // We do not support these operators
-        if (!isValidQuery(cmd)) {
-            return BSONObj();
-        }
+        // if (!isValidQuery(cmd)) {
+        //     return BSONObj();
+        // }
         pipeline.push_back(BSON("$match" << value));
     }
 
@@ -217,6 +217,7 @@ public:
         }
 
         qr->setExplain(isExplain);
+        qr->setKey(key);
 
         const ExtensionsCallbackReal extensionsCallback(txn, &nss);
         auto cq = CanonicalQuery::canonicalize(txn, std::move(qr), extensionsCallback);
@@ -237,29 +238,29 @@ public:
         const string ns = parseNs(dbname, cmdObj);
         const NamespaceString nss(ns);
 
-        // Check if this query is being performed on a view.
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            BSONObj explainCmd = convertToAggregate(cmdObj, true);
-            if (!explainCmd.isEmpty()) {
-                Command* c = Command::findCommand("aggregate");
-                std::string errMsg;
-                bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
-                if (retVal) {
-                    return Status::OK();
-                }
-            } else {
-                return {ErrorCodes::OptionNotSupportedOnView,
-                        str::stream() << "One or more options not supported on view."};
-            }
-        }
-
-        auto parsedDistinct = parse(txn, nss, cmdObj, true);
+        auto parsedDistinct = parse(txn, nss, cmdObj, false);
         if (!parsedDistinct.isOK()) {
             return parsedDistinct.getStatus();
         }
 
-        AutoGetCollectionForRead ctx(txn, ns);
+        auto qr = &parsedDistinct.getValue().getQuery()->getQueryRequest();
 
+        // Are we counting on a view?
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+            Status viewValidationStatus = qr->validateForView();
+            if (!viewValidationStatus.isOK()) {
+                return viewValidationStatus;
+            }
+            std::string errmsg;
+            BSONObj agg = qr->asAggregationCommand("distinct");
+            Command *c = Command::findCommand("aggregate");
+            bool retval = c->run(txn, dbname, agg, 0, errmsg, *out);
+            if (retval) {
+                return Status::OK();
+            }
+        }
+
+        AutoGetCollectionForRead ctx(txn, ns);
         Collection* collection = ctx.getCollection();
 
         auto executor = getExecutorDistinct(
@@ -283,23 +284,22 @@ public:
         const string ns = parseNs(dbname, cmdObj);
         const NamespaceString nss(ns);
 
-        // Check if this query is being performed on a view.
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            BSONObj agg = convertToAggregate(cmdObj, false);
-            if (!agg.isEmpty()) {
-                Command* c = Command::findCommand("aggregate");
-                bool retval = c->run(txn, dbname, agg, options, errmsg, result);
-                return retval;
-            } else {
-                return appendCommandStatus(result,
-                                       {ErrorCodes::OptionNotSupportedOnView,
-                                        str::stream() << "One or more option not supported on views."});
-            }
-        }
-
         auto parsedDistinct = parse(txn, nss, cmdObj, false);
         if (!parsedDistinct.isOK()) {
             return appendCommandStatus(result, parsedDistinct.getStatus());
+        }
+
+        auto qr = &parsedDistinct.getValue().getQuery()->getQueryRequest();
+        // Are we counting on a view?
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+            Status viewValidationStatus = qr->validateForView();
+            if (!viewValidationStatus.isOK()) {
+                return appendCommandStatus(result, viewValidationStatus);
+            }
+            BSONObj agg = qr->asAggregationCommand("distinct");
+            Command *c = Command::findCommand("aggregate");
+            bool retval = c->run(txn, dbname, agg, options, errmsg, result);
+            return retval;
         }
 
         auto collator = parsedDistinct.getValue().getQuery()->getCollator();

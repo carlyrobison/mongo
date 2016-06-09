@@ -40,6 +40,8 @@ class QueryMessage;
 class Status;
 template <typename T>
 class StatusWith;
+class ParsedDistinct;
+class CountRequest;
 
 /**
  * Parses the QueryMessage or find command received from the user and makes the various fields
@@ -58,6 +60,10 @@ public:
      * tailable).
      */
     Status validate() const;
+
+    static std::unique_ptr<QueryRequest> makeFromCountRequest(const CountRequest& request,
+                                                              bool isExplain);
+    
 
     /**
      * Parses a find command object, 'cmdObj'. Caller must indicate whether or not this lite
@@ -178,6 +184,10 @@ public:
 
     void setCollation(BSONObj collation) {
         _collation = collation.getOwned();
+    }
+
+    void setKey(std::string key) {
+        _key = key;
     }
 
     static const long long kDefaultBatchSize;
@@ -377,6 +387,19 @@ public:
      */
     int getOptions() const;
 
+    /**
+     * Read-Only View related functions
+     */
+
+    /**
+     * Converts this QR into a corresponding $match aggregation
+     */
+    void asAggregationCommand(BSONObjBuilder* b, StringData cmd) const;
+    BSONObj asAggregationCommand() const;
+    BSONObj asAggregationCommand(StringData cmd) const;
+
+    Status validateForView() const;
+
     //
     // Old parsing code: SOON TO BE DEPRECATED.
     //
@@ -432,6 +455,8 @@ private:
     BSONObj _readConcern;
     // The collation is parsed elsewhere.
     BSONObj _collation;
+    // The key (for distinct) is parsed elsewhere.
+    std::string _key;
 
     bool _wantMore = true;
 

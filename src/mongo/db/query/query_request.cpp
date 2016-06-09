@@ -35,7 +35,10 @@
 #include "mongo/client/dbclientinterface.h"
 #include "mongo/db/dbmessage.h"
 #include "mongo/db/namespace_string.h"
+#include "mongo/db/query/count_request.h"
+#include "mongo/db/query/parsed_distinct.h"
 #include "mongo/db/repl/read_concern_args.h"
+#include "mongo/stdx/memory.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/mongoutils/str.h"
 
@@ -106,10 +109,22 @@ const char QueryRequest::kShardVersionField[] = "shardVersion";
 QueryRequest::QueryRequest(NamespaceString nss) : _nss(std::move(nss)) {}
 
 // static
+std::unique_ptr<QueryRequest> QueryRequest::makeFromCountRequest(const CountRequest& request,
+                                                                 bool isExplain) {
+    auto qr = stdx::make_unique<QueryRequest>(request.getNs());
+    qr->setFilter(request.getQuery());
+    qr->setCollation(request.getCollation());
+    qr->setHint(request.getHint());
+    qr->setExplain(isExplain);
+
+    return std::move(qr);
+}
+
+// static
 StatusWith<unique_ptr<QueryRequest>> QueryRequest::makeFromFindCommand(NamespaceString nss,
                                                                        const BSONObj& cmdObj,
                                                                        bool isExplain) {
-    unique_ptr<QueryRequest> qr(new QueryRequest(std::move(nss)));
+    auto qr = stdx::make_unique<QueryRequest>(std::move(nss));
     qr->_explain = isExplain;
 
     // Parse the command BSON by looping through one element at a time.
@@ -908,6 +923,140 @@ void QueryRequest::addMetaProjection() {
 
 boost::optional<long long> QueryRequest::getEffectiveBatchSize() const {
     return _batchSize ? _batchSize : _ntoreturn;
+}
+
+// Views related functions
+void QueryRequest::asAggregationCommand(BSONObjBuilder* b, StringData cmd) const {
+    b->append("aggregate", _nss.coll());
+
+    BSONArrayBuilder pipeline;
+
+    if (!_filter.isEmpty()) {
+        pipeline.append(BSON("$match" << _filter));
+    }
+
+    if (!_sort.isEmpty()) {
+        pipeline.append(BSON("$sort" << _sort));
+    }
+
+    if (_skip) {
+        pipeline.append(BSON("$skip" << *_skip));
+    }
+
+    if (_limit) {
+        pipeline.append(BSON("$limit" << *_limit));
+    }
+
+    if (!_proj.isEmpty()) {
+        pipeline.append(BSON("$project" << _proj));
+    }
+
+    // Build $group stage for count
+    if (cmd == "count") {
+        pipeline.append(BSON("$group" << BSON("_id" << BSONNULL << "count" << BSON("$sum" << 1))));
+    }
+
+    // Build $group stage for distinct
+    if (cmd == "distinct") {
+        BSONObj group = BSON("$group" << BSON("_id" << BSONNULL << _key << BSON("$addToSet"
+                                                                                 << "$" + _key)));
+        pipeline.append(group);
+    }
+
+    b->append("pipeline", pipeline.arr());
+
+    if (_batchSize) {
+        b->append("cursor", BSON(kBatchSizeField << *_batchSize));
+    } else {
+        if (cmd.empty()) {
+            b->append("cursor", BSONObj());
+        }
+    }
+
+    if (_explain) {
+        b->append("explain", _explain);
+    }
+
+    if (_maxTimeMS > 0) {
+        b->append(cmdOptionMaxTimeMS, _maxTimeMS);
+    }
+}
+
+BSONObj QueryRequest::asAggregationCommand(StringData cmd) const {
+    BSONObjBuilder b;
+    asAggregationCommand(&b, cmd);
+    return b.obj();
+}
+
+BSONObj QueryRequest::asAggregationCommand() const {
+    BSONObjBuilder b;
+    asAggregationCommand(&b, "");
+    return b.obj();
+}
+
+Status QueryRequest::validateForView() const {
+    if (!_min.isEmpty()) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kMinField << " not supported on views."};
+    }
+    if (!_max.isEmpty()) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kMaxField << " not supported on views."};
+    }
+    if (!_wantMore) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kSingleBatchField << " not supported on views."};
+    }
+    if (_maxScan != 0) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kMaxScanField << " not supported on views."};
+    }
+    if (_returnKey) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kReturnKeyField << " not supported on views."};
+    }
+    if (!_hint.isEmpty()) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kHintField << " not supported on views."};
+    }
+    if (!_comment.empty()) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kCommentField << " not supported on views."};
+    }
+    if (_showRecordId) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kShowRecordIdField << " not supported on views."};
+    }
+    if (_snapshot) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kSnapshotField << " not supported on views."};
+    }
+    if (_tailable) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kTailableField << " not supported on views."};
+    }
+    if (_oplogReplay) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kOplogReplayField << " not supported on views."};
+    }
+    if (_noCursorTimeout) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kNoCursorTimeoutField << " not supported on views."};
+    }
+    if (_awaitData) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kAwaitDataField << " not supported on views."};
+    }
+    if (_allowPartialResults) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kPartialResultsField << " not supported on views."};
+    }
+    // TODO: Add collation support when available
+    if (!_collation.isEmpty()) {
+        return {ErrorCodes::OptionNotSupportedOnView,
+                str::stream() << "Option " << kCollationField << " not supported on views."};
+    }
+    return Status::OK();
 }
 
 }  // namespace mongo

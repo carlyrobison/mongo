@@ -51,27 +51,7 @@ using std::unique_ptr;
 using std::string;
 using std::stringstream;
 
-bool isValidQuery(const BSONObj& o) {
-    // log() << "Query: " << o.jsonString();
-    for (BSONElement e : o) {
-        // log() << "Element: " << e;
-        if (e.type() == Object || e.type() == Array) {
-            if (!isValidQuery(e.Obj())) {
-                return false;
-            }
-        } else {
-            StringData fieldName = e.fieldNameStringData();
-            if (fieldName == "$where" || fieldName == "$elemMatch" || fieldName == "geo" ||
-                fieldName == "loc") {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
-    log() << "Converting to aggregate command: " << cmd.jsonString();
     BSONObjBuilder b;
     std::vector<BSONObj> pipeline;
 
@@ -87,9 +67,6 @@ BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
     // Build the pipeline
     if (cmd.hasField("query")) {
         BSONObj value = cmd.getObjectField("query");
-        if (!isValidQuery(value)) {
-            return BSONObj();
-        }
         pipeline.push_back(BSON("$match" << value));
     }
     if (cmd.hasField("skip")) {
@@ -162,19 +139,24 @@ public:
         }
 
         /* Check if this is running on a view */
+        bool isExplain = true;
+        auto qr = QueryRequest::makeFromCountRequest(request.getValue(), isExplain);
+
         const NamespaceString nss(parseNs(dbname, cmdObj));
+
+        // Are we counting on a view?
         if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            BSONObj explainCmd = convertToAggregate(cmdObj, true);
-            if (!explainCmd.isEmpty()) {
-                Command* c = Command::findCommand("aggregate");
-                std::string errMsg;
-                bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
-                if (retVal) {
-                    return Status::OK();
-                }
-            } else {
-                return {ErrorCodes::OptionNotSupportedOnView,
-                        str::stream() << "One or more options not supported on view."};
+            auto query = qr.get();
+            Status viewValidationStatus = query->validateForView();
+            if (!viewValidationStatus.isOK()) {
+                return viewValidationStatus;
+            }
+            std::string errmsg;
+            BSONObj agg = qr->asAggregationCommand("count");
+            Command *c = Command::findCommand("aggregate");
+            bool retval = c->run(txn, dbname, agg, 0, errmsg, *out);
+            if (retval) {
+                return Status::OK();
             }
         }
 
@@ -189,7 +171,7 @@ public:
         auto statusWithPlanExecutor = getExecutorCount(txn,
                                                        collection,
                                                        request.getValue(),
-                                                       true,  // explain
+                                                       std::move(qr),
                                                        PlanExecutor::YIELD_AUTO);
         if (!statusWithPlanExecutor.isOK()) {
             return statusWithPlanExecutor.getStatus();
@@ -212,22 +194,22 @@ public:
             return appendCommandStatus(result, request.getStatus());
         }
 
-        log() << cmdObj.jsonString();
+        bool isExplain = false;
+        auto qr = QueryRequest::makeFromCountRequest(request.getValue(), isExplain);
 
         const NamespaceString nss(parseNs(dbname, cmdObj));
 
         // Are we counting on a view?
         if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            BSONObj agg = convertToAggregate(cmdObj, false);
-            if (!agg.isEmpty()) {
-                Command *c = Command::findCommand("aggregate");
-                bool retval = c->run(txn, dbname, agg, options, errmsg, result);
-                return retval;
-            } else {
-                return appendCommandStatus(result,
-                                       {ErrorCodes::OptionNotSupportedOnView,
-                                        str::stream() << "One or more option not supported on views."});
+            auto query = qr.get();
+            Status viewValidationStatus = query->validateForView();
+            if (!viewValidationStatus.isOK()) {
+                return appendCommandStatus(result, viewValidationStatus);
             }
+            BSONObj agg = query->asAggregationCommand("count");
+            Command *c = Command::findCommand("aggregate");
+            bool retval = c->run(txn, dbname, agg, options, errmsg, result);
+            return retval;
         }
 
         // Acquire locks.
@@ -241,7 +223,7 @@ public:
         auto statusWithPlanExecutor = getExecutorCount(txn,
                                                        collection,
                                                        request.getValue(),
-                                                       false,  // !explain
+                                                       std::move(qr),
                                                        PlanExecutor::YIELD_AUTO);
         if (!statusWithPlanExecutor.isOK()) {
             return appendCommandStatus(result, statusWithPlanExecutor.getStatus());

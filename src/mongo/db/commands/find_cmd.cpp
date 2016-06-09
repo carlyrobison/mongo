@@ -240,10 +240,22 @@ public:
                     str::stream() << "Invalid collection name: " << nss.ns()};
         }
 
+        // Parse the command BSON to a QueryRequest.
+        const bool isExplain = true;
+        auto qrStatus = QueryRequest::makeFromFindCommand(nss, cmdObj, isExplain);
+        if (!qrStatus.isOK()) {
+            return qrStatus.getStatus();
+        } 
+
+        auto& qr = qrStatus.getValue();
+
         /* Check if this is running on a view */
         if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            BSONObj explainCmd = convertToAggregate(cmdObj, true);
-            if (!explainCmd.isEmpty()) {
+            Status viewValidationStatus = qr->validateForView();
+            if (!viewValidationStatus.isOK()) {
+                return viewValidationStatus;
+            } else {
+                BSONObj explainCmd = qr->asAggregationCommand();
                 Command* c = Command::findCommand("aggregate");
                 std::string errMsg;
                 bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
@@ -251,17 +263,6 @@ public:
                     return Status::OK();
                 }
             }
-            else {
-                return {ErrorCodes::OptionNotSupportedOnView,
-                        str::stream() << "One or more options not supported on view."};
-            }
-        }
-
-        // Parse the command BSON to a QueryRequest.
-        const bool isExplain = true;
-        auto qrStatus = QueryRequest::makeFromFindCommand(nss, cmdObj, isExplain);
-        if (!qrStatus.isOK()) {
-            return qrStatus.getStatus();
         }
 
         // Finish the parsing step by using the QueryRequest to create a CanonicalQuery.
@@ -314,17 +315,25 @@ public:
                                         str::stream() << "Invalid collection name: " << nss.ns()});
         }
 
+        // Parse the command BSON to a QueryRequest.
+        const bool isExplain = false;
+        auto qrStatus = QueryRequest::makeFromFindCommand(nss, cmdObj, isExplain);
+        if (!qrStatus.isOK()) {
+            return appendCommandStatus(result, qrStatus.getStatus());
+        }
+
+        auto& qr = qrStatus.getValue();
+            
         // Check if this query is being performed on a view.
         if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            BSONObj match = convertToAggregate(cmdObj, false);
-            if (!match.isEmpty()) {
+            Status viewValidationStatus = qr->validateForView();
+            if (!viewValidationStatus.isOK()) {
+                return appendCommandStatus(result, viewValidationStatus);
+            } else {
+                BSONObj match = qr->asAggregationCommand();
                 Command* c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, match, options, errmsg, result);
                 return retval;
-            } else {
-                return appendCommandStatus(result,
-                                       {ErrorCodes::OptionNotSupportedOnView,
-                                        str::stream() << "One or more option not supported on views."});
             }
         }
 
@@ -336,15 +345,6 @@ public:
                 result,
                 Status(ErrorCodes::IllegalOperation, "Cannot run find command from eval()"));
         }
-
-        // Parse the command BSON to a QueryRequest.
-        const bool isExplain = false;
-        auto qrStatus = QueryRequest::makeFromFindCommand(nss, cmdObj, isExplain);
-        if (!qrStatus.isOK()) {
-            return appendCommandStatus(result, qrStatus.getStatus());
-        }
-
-        auto& qr = qrStatus.getValue();
 
         // Validate term before acquiring locks, if provided.
         if (auto term = qr->getReplicationTerm()) {
@@ -374,9 +374,8 @@ public:
         std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
 
         // Acquire locks.
-        boost::optional<AutoGetCollectionForRead> ctx;
-        ctx.emplace(txn, nss);
-        Collection* collection = ctx->getCollection();
+        AutoGetCollectionForRead ctx(txn, nss);
+        Collection* collection = ctx.getCollection();
 
         // Get the execution plan for the query.
         auto statusWithPlanExecutor =
