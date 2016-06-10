@@ -44,6 +44,7 @@
 #include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/server_options.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -53,6 +54,12 @@ Status dropCollection(OperationContext* txn,
                       BSONObjBuilder& result) {
     if (!serverGlobalParams.quiet) {
         log() << "CMD: drop " << collectionName;
+    }
+
+    ViewCatalog* vCatalog = ViewCatalog::getInstance();
+    if (vCatalog->lookup(collectionName.ns())) {
+        vCatalog->removeFromCatalog(collectionName.ns());
+        return Status::OK();
     }
 
     const std::string dbname = collectionName.db().toString();

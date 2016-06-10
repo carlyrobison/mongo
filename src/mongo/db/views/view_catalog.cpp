@@ -90,6 +90,10 @@ ViewDefinition* ViewCatalog::lookup(StringData ns) {
     return nullptr;
 }
 
+void ViewCatalog::removeFromCatalog(StringData fullNs) {
+    _viewMap.erase(fullNs);
+}
+
 ViewDefinition* ViewCatalog::lookup(StringData dbName, StringData viewName) {
     return lookup(generateViewNamespace(dbName, viewName));
 }

@@ -126,6 +126,11 @@ public:
                       BSONObj& pipeline);
 
     /**
+     * Drop a view. Requires a fully qualified namespace
+     */
+    void removeFromCatalog(StringData fullNs);
+
+    /**
      * Look up the namespace in the view catalog, returning a pointer to a View definition, or
      * nullptr if it doesn't exist. Note that the caller does not own the pointer.
      *
