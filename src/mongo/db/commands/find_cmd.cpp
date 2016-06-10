@@ -154,11 +154,18 @@ public:
             } else {
                 BSONObj explainCmd = qr->asAggregationCommand();
                 Command* c = Command::findCommand("aggregate");
-                std::string errMsg;
-                bool retVal = c->run(txn, dbname, explainCmd, 0, errMsg, *out);
-                if (retVal) {
-                    return Status::OK();
-                }
+                std::string errmsg;
+                try {
+                    c->run(txn, dbname, explainCmd, 0, errmsg, *out);
+                } catch (DBException& e) {
+                    auto errorCode = e.getCode();
+                    if (errorCode == ErrorCodes::InvalidPipelineOperator) {
+                        return {ErrorCodes::InvalidPipelineOperator,
+                                str::stream() << "Unsupported in view pipeline: " << e.what()};
+                    }
+                    return e.toStatus();
+                } 
+                return Status::OK();
             }
         }
 
@@ -229,8 +236,17 @@ public:
             } else {
                 BSONObj match = qr->asAggregationCommand();
                 Command* c = Command::findCommand("aggregate");
-                bool retval = c->run(txn, dbname, match, options, errmsg, result);
-                return retval;
+                try {
+                    c->run(txn, dbname, match, options, errmsg, result);
+                } catch (DBException& e) {
+                    auto errorCode = e.getCode();
+                    if (errorCode == ErrorCodes::InvalidPipelineOperator) {
+                        return appendCommandStatus(result, {ErrorCodes::InvalidPipelineOperator,
+                                                            str::stream() << "Unsupported in view pipeline: " << e.what()});
+                    }
+                    return appendCommandStatus(result, e.toStatus());
+                } 
+                return true;
             }
         }
 

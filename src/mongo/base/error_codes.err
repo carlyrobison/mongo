@@ -161,6 +161,7 @@ error_code("DurationOverflow", 159)
 error_code("ViewRecursionLimitExceeded", 160)
 error_code("CommandNotSupportedOnView", 161)
 error_code("OptionNotSupportedOnView", 162)
+error_code("InvalidPipelineOperator", 163)
 
 # Non-sequential error codes (for compatibility only)
 error_code("SocketException", 9001)

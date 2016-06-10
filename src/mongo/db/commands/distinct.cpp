@@ -191,10 +191,17 @@ public:
             std::string errmsg;
             BSONObj agg = qr->asAggregationCommand("distinct");
             Command *c = Command::findCommand("aggregate");
-            bool retval = c->run(txn, dbname, agg, 0, errmsg, *out);
-            if (retval) {
-                return Status::OK();
-            }
+            try {
+                c->run(txn, dbname, agg, 0, errmsg, *out);
+            } catch (DBException& e) {
+                auto errorCode = e.getCode();
+                if (errorCode == ErrorCodes::InvalidPipelineOperator) {
+                    return {ErrorCodes::InvalidPipelineOperator,
+                            str::stream() << "Unsupported in view pipeline: " << e.what()};
+                }
+                return e.toStatus();
+            } 
+            return Status::OK();
         }
 
         AutoGetCollectionForRead ctx(txn, ns);
@@ -235,8 +242,17 @@ public:
             }
             BSONObj agg = qr->asAggregationCommand("distinct");
             Command *c = Command::findCommand("aggregate");
-            bool retval = c->run(txn, dbname, agg, options, errmsg, result);
-            return retval;
+            try {
+                c->run(txn, dbname, agg, options, errmsg, result);
+            } catch (DBException& e) {
+                auto errorCode = e.getCode();
+                if (errorCode == ErrorCodes::InvalidPipelineOperator) {
+                    return appendCommandStatus(result, {ErrorCodes::InvalidPipelineOperator,
+                                                        str::stream() << "Unsupported in view pipeline: " << e.what()});
+                }
+                return appendCommandStatus(result, e.toStatus());
+            } 
+            return true;
         }
 
         auto collator = parsedDistinct.getValue().getQuery()->getCollator();
