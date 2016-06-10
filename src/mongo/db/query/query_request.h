@@ -61,6 +61,12 @@ public:
      */
     Status validate() const;
 
+    /**
+     * Parse the CountRequest and return a QueryRequest with the appropriate fields set.
+     * Caller must indicate whether or not this query is an explained query or not
+     * via 'isExplained'.
+     * Returns a unique pointer containing the QueryRequest
+     */
     static std::unique_ptr<QueryRequest> makeFromCountRequest(const CountRequest& request,
                                                               bool isExplain);
     

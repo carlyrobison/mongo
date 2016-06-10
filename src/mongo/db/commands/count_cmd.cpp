@@ -51,46 +51,6 @@ using std::unique_ptr;
 using std::string;
 using std::stringstream;
 
-BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
-    BSONObjBuilder b;
-    std::vector<BSONObj> pipeline;
-
-    // Do not support single batch
-    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || cmd.hasField("maxScan") ||
-        cmd.hasField("max") || cmd.hasField("min") || cmd.hasField("returnKey") ||
-        cmd.hasField("tailable") || cmd.hasField("showRecordId") || cmd.hasField("snapshot") ||
-        cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
-        cmd.hasField("awaitData") || cmd.hasField("allowPartialResults")) {
-        return BSONObj();
-    }
-
-    // Build the pipeline
-    if (cmd.hasField("query")) {
-        BSONObj value = cmd.getObjectField("query");
-        pipeline.push_back(BSON("$match" << value));
-    }
-    if (cmd.hasField("skip")) {
-        pipeline.push_back(BSON("$skip" << cmd.getIntField("skip")));
-    }
-    if (cmd.hasField("limit")) {
-        int value = cmd.getIntField("limit");
-        if (value < 0)
-            value = -value;
-        pipeline.push_back(BSON("$limit" << value));
-    }
-
-    pipeline.push_back(BSON("$group" << BSON("_id" << BSONNULL << "count" << BSON("$sum" << 1))));
-
-    b.append("aggregate", cmd["count"].str());
-    b.append("pipeline", pipeline);
-
-    if (cmd.hasField("maxTimeMS")) {
-        b.append("maxTimeMS", cmd.getIntField("maxTimeMS"));
-    }
-
-    return b.obj();
-}
-
 /**
  * Implements the MongoD side of the count command.
  */

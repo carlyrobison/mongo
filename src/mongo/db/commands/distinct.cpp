@@ -75,69 +75,6 @@ const char kKeyField[] = "key";
 const char kQueryField[] = "query";
 const char kCollationField[] = "collation";
 
-// bool isValidQuery(const BSONObj& o) {
-//     // log() << "Query: " << o.jsonString();
-//     for (BSONElement e : o) {
-//         // log() << "Element: " << e;
-//         if (e.type() == Object || e.type() == Array) {
-//             if (!isValidQuery(e.Obj())) {
-//                 return false;
-//             }
-//         } else {
-//             StringData fieldName = e.fieldNameStringData();
-//             if (fieldName == "$where" || fieldName == "$elemMatch" || fieldName == "geo" ||
-//                 fieldName == "loc") {
-//                 return false;
-//             }
-//         }
-//     }
-//     return true;
-// }
-
-BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
-    log() << cmd.jsonString();
-    BSONObjBuilder b;
-    std::vector<BSONObj> pipeline;
-
-    // Options that we do not support
-    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || cmd.hasField("maxScan") ||
-        cmd.hasField("max") || cmd.hasField("min") || cmd.hasField("returnKey") ||
-        cmd.hasField("tailable") || cmd.hasField("showRecordId") || cmd.hasField("snapshot") ||
-        cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
-        cmd.hasField("awaitData") || cmd.hasField("allowPartialResults")) {
-        return BSONObj();
-    }
-
-    // Build the pipeline
-    if (cmd.hasField("query")) {
-        BSONObj value = cmd.getObjectField("query");
-        // We do not support these operators
-        // if (!isValidQuery(cmd)) {
-        //     return BSONObj();
-        // }
-        pipeline.push_back(BSON("$match" << value));
-    }
-
-    if (cmd.hasField("key")) {
-        std::string value = cmd.getStringField("key");
-        BSONObj group = BSON("$group" << BSON("_id" << BSONNULL << value << BSON("$addToSet"
-                                                                                 << "$" + value)));
-        pipeline.push_back(group);
-    }
-
-    b.append("aggregate", cmd["distinct"].str());
-    b.append("pipeline", pipeline);
-
-    if (hasExplain) {
-        b.append("explain", true);
-    }
-    if (cmd.hasField("maxTimeMS")) {
-        b.append("maxTimeMS", cmd.getIntField("maxTimeMS"));
-    }
-
-    return b.obj();
-}
-
 }  // namespace
 
 class DistinctCommand : public Command {
