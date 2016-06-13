@@ -44,6 +44,7 @@
 #include "mongo/db/index_names.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/query/find_common.h"
+#include "mongo/db/views/view_catalog.h"
 
 /**
  * Examines all documents in a given radius of a given point.
@@ -94,6 +95,10 @@ public:
              string& errmsg,
              BSONObjBuilder& result) {
         const NamespaceString nss = parseNsCollectionRequired(dbname, cmdObj);
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+            errmsg = "cannot use geoSearch on a view";
+            return false;
+        }
 
         AutoGetCollectionForRead ctx(txn, nss.ns());
 
