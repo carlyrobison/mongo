@@ -117,7 +117,7 @@ std::unique_ptr<QueryRequest> QueryRequest::makeFromCountRequest(const CountRequ
     qr->setHint(request.getHint());
     qr->setExplain(isExplain);
 
-    return std::move(qr);
+    return qr;
 }
 
 // static
