@@ -48,6 +48,7 @@
 #include "mongo/db/s/collection_metadata.h"
 #include "mongo/db/s/sharding_state.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/s/shard_key_pattern.h"
 #include "mongo/util/scopeguard.h"
 
@@ -99,6 +100,11 @@ public:
         Status status = userAllowedWriteNS(ns);
         if (!status.isOK())
             return appendCommandStatus(result, status);
+
+        if (ViewCatalog::getInstance()->lookup(ns.ns())) {
+            errmsg = "cannot create indexes on a view";
+            return false;
+        }
 
         if (cmdObj["indexes"].type() != Array) {
             errmsg = "indexes has to be an array";
