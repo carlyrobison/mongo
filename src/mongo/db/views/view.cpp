@@ -55,6 +55,20 @@ ViewDefinition::ViewDefinition(std::string dbName, std::string viewName, std::st
     }
 }
 
+void ViewDefinition::changeBackingNs(std::string newNs) {
+    stdx::lock_guard<stdx::mutex> lock(_mutex);
+    _backingViewName = newNs;
+}
+
+void ViewDefinition::changePipeline(const BSONObj& pipeline) {
+    stdx::lock_guard<stdx::mutex> lock(_mutex);
+    _pipeline.clear();
+    for (BSONElement e : pipeline) {
+        BSONObj value = e.Obj();
+        _pipeline.push_back(value.copy());
+    }
+}
+
 BSONObj ViewDefinition::getAggregateCommand(std::string rootNs,
                                             BSONObj& cmd,
                                             std::vector<BSONObj> pipeline) {

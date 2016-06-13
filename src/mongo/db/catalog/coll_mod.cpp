@@ -39,6 +39,7 @@
 #include "mongo/db/index/index_descriptor.h"
 #include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/views/view_catalog.h"
 
 namespace mongo {
 Status collMod(OperationContext* txn,
@@ -55,8 +56,11 @@ Status collMod(OperationContext* txn,
     // progress.
     BackgroundOperation::assertNoBgOpInProgForNs(nss);
 
-    // If db/collection does not exist, short circuit and return.
-    if (!db || !coll) {
+    // May also modify a view instead of a collection.
+    ViewDefinition* view = ViewCatalog::getInstance()->lookup(nss.ns());
+
+    // If db/collection/view does not exist, short circuit and return.
+    if (!db || (!coll && !view)) {
         return Status(ErrorCodes::NamespaceNotFound, "ns does not exist");
     }
 
@@ -83,6 +87,11 @@ Status collMod(OperationContext* txn,
         } else if (QueryRequest::cmdOptionMaxTimeMS == e.fieldNameStringData()) {
             // no-op
         } else if (str::equals("index", e.fieldName())) {
+            if (view) {
+                errorStatus = Status(ErrorCodes::InvalidOptions, "cannot modify indexes on a view");
+                continue;
+            }
+
             BSONObj indexObj = e.Obj();
             BSONObj keyPattern = indexObj.getObjectField("keyPattern");
 
@@ -132,17 +141,53 @@ Status collMod(OperationContext* txn,
                 result->appendAs(newExpireSecs, "expireAfterSeconds_new");
             }
         } else if (str::equals("validator", e.fieldName())) {
+            if (view) {
+                errorStatus = Status(ErrorCodes::InvalidOptions, "cannot modify validation options on a view");
+                continue;
+            }
+
             auto status = coll->setValidator(txn, e.Obj());
             if (!status.isOK())
                 errorStatus = std::move(status);
         } else if (str::equals("validationLevel", e.fieldName())) {
+            if (view) {
+                errorStatus = Status(ErrorCodes::InvalidOptions, "cannot modify validation options on a view");
+                continue;
+            }
+
             auto status = coll->setValidationLevel(txn, e.String());
             if (!status.isOK())
                 errorStatus = std::move(status);
         } else if (str::equals("validationAction", e.fieldName())) {
+            if (view) {
+                errorStatus = Status(ErrorCodes::InvalidOptions, "cannot modify validation options on a view");
+                continue;
+            }
+
             auto status = coll->setValidationAction(txn, e.String());
             if (!status.isOK())
                 errorStatus = std::move(status);
+        } else if (str::equals("pipeline", e.fieldName())) {
+            if (!view) {
+                errorStatus = Status(ErrorCodes::InvalidOptions, "'pipeline' option only supported on a view");
+                continue;
+            }
+            if (!e.isABSONObj()) {
+                errorStatus = Status(ErrorCodes::InvalidOptions, "not a valid aggregation pipeline");
+                continue;
+            }
+            // TODO: need to parse this pipeline to verify that it's legal
+            view->changePipeline(e.Obj());
+        } else if (str::equals("view", e.fieldName())) {
+            if (!view) {
+                errorStatus = Status(ErrorCodes::InvalidOptions, "'view' option only supported on a view");
+                continue;
+            }
+            if (e.type() != mongo::String) {
+                errorStatus = Status(ErrorCodes::InvalidOptions, "'view' option must be a string");
+                continue;
+            }
+            view->changeBackingNs(e.str());
         } else {
             // As of SERVER-17312 we only support these two options. When SERVER-17320 is
             // resolved this will need to be enhanced to handle other options.
@@ -154,6 +199,11 @@ Status collMod(OperationContext* txn,
             if (!flag) {
                 errorStatus = Status(ErrorCodes::InvalidOptions,
                                      str::stream() << "unknown option to collMod: " << name);
+                continue;
+            }
+
+            if (view) {
+                errorStatus = Status(ErrorCodes::InvalidOptions, "option not supported on a view");
                 continue;
             }
 

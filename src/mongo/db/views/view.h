@@ -74,6 +74,10 @@ public:
         return _pipeline;
     }
 
+    void changeBackingNs(std::string newNs);
+
+    void changePipeline(const BSONObj& pipeline);
+
     static BSONObj getAggregateCommand(std::string rootNs,
                                        BSONObj& cmd,
                                        std::vector<BSONObj> pipeline);
@@ -94,6 +98,7 @@ public:
     }
 
 private:
+    stdx::mutex _mutex;
     std::string _dbName;
     std::string _viewName;         // The namespace of the view.
     std::string _backingViewName;  // The namespace of the view/collection upon which the view is based.
