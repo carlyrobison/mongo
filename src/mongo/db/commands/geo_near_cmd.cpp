@@ -53,6 +53,7 @@
 #include "mongo/db/query/get_executor.h"
 #include "mongo/db/query/plan_summary_stats.h"
 #include "mongo/db/range_preserver.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/platform/unordered_map.h"
 #include "mongo/util/log.h"
 
@@ -105,9 +106,14 @@ public:
             return false;
         }
 
-        const NamespaceString nss(parseNs(dbname, cmdObj));
-        AutoGetCollectionForRead ctx(txn, nss);
 
+        const NamespaceString nss(parseNs(dbname, cmdObj));
+        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+            errmsg = "cannot use geoNear on a view";
+            return false;
+        }
+
+        AutoGetCollectionForRead ctx(txn, nss);
         Collection* collection = ctx.getCollection();
         if (!collection) {
             errmsg = "can't find ns";
