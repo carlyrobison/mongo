@@ -959,7 +959,7 @@ void QueryRequest::asAggregationCommand(BSONObjBuilder* b, StringData cmd) const
     // Build $group stage for distinct
     if (cmd == "distinct") {
         BSONObj group = BSON("$group" << BSON("_id" << BSONNULL << _key << BSON("$addToSet"
-                                                                                 << "$" + _key)));
+                                                                                << "$" + _key)));
         pipeline.append(group);
     }
 

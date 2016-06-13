@@ -69,7 +69,7 @@ public:
      */
     static std::unique_ptr<QueryRequest> makeFromCountRequest(const CountRequest& request,
                                                               bool isExplain);
-    
+
 
     /**
      * Parses a find command object, 'cmdObj'. Caller must indicate whether or not this lite

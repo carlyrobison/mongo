@@ -256,7 +256,7 @@ public:
         ViewCatalog* viewCatalog = ViewCatalog::getInstance();
 
         if (viewCatalog) {
-            for (auto&& view: *viewCatalog) {
+            for (auto&& view : *viewCatalog) {
                 BSONObj viewBson = buildViewBson(view);
                 if (!viewBson.isEmpty()) {
                     _addWorkingSetMember(txn, viewBson, matcher.get(), ws.get(), root.get());

@@ -113,7 +113,7 @@ public:
             }
             std::string errmsg;
             BSONObj agg = qr->asAggregationCommand("count");
-            Command *c = Command::findCommand("aggregate");
+            Command* c = Command::findCommand("aggregate");
             try {
                 c->run(txn, dbname, agg, 0, errmsg, *out);
             } catch (DBException& e) {
@@ -123,7 +123,7 @@ public:
                             str::stream() << "Unsupported in view pipeline: " << e.what()};
                 }
                 return e.toStatus();
-            } 
+            }
             return Status::OK();
         }
 
@@ -135,11 +135,8 @@ public:
         // version on initial entry into count.
         RangePreserver preserver(collection);
 
-        auto statusWithPlanExecutor = getExecutorCount(txn,
-                                                       collection,
-                                                       request.getValue(),
-                                                       std::move(qr),
-                                                       PlanExecutor::YIELD_AUTO);
+        auto statusWithPlanExecutor = getExecutorCount(
+            txn, collection, request.getValue(), std::move(qr), PlanExecutor::YIELD_AUTO);
         if (!statusWithPlanExecutor.isOK()) {
             return statusWithPlanExecutor.getStatus();
         }
@@ -174,17 +171,19 @@ public:
                 return appendCommandStatus(result, viewValidationStatus);
             }
             BSONObj agg = query->asAggregationCommand("count");
-            Command *c = Command::findCommand("aggregate");
+            Command* c = Command::findCommand("aggregate");
             try {
                 c->run(txn, dbname, agg, options, errmsg, result);
             } catch (DBException& e) {
                 auto errorCode = e.getCode();
                 if (errorCode == ErrorCodes::InvalidPipelineOperator) {
-                    return appendCommandStatus(result, {ErrorCodes::InvalidPipelineOperator,
-                                                        str::stream() << "Unsupported in view pipeline: " << e.what()});
+                    return appendCommandStatus(
+                        result,
+                        {ErrorCodes::InvalidPipelineOperator,
+                         str::stream() << "Unsupported in view pipeline: " << e.what()});
                 }
                 return appendCommandStatus(result, e.toStatus());
-            } 
+            }
             return true;
         }
 
@@ -196,11 +195,8 @@ public:
         // version on initial entry into count.
         RangePreserver preserver(collection);
 
-        auto statusWithPlanExecutor = getExecutorCount(txn,
-                                                       collection,
-                                                       request.getValue(),
-                                                       std::move(qr),
-                                                       PlanExecutor::YIELD_AUTO);
+        auto statusWithPlanExecutor = getExecutorCount(
+            txn, collection, request.getValue(), std::move(qr), PlanExecutor::YIELD_AUTO);
         if (!statusWithPlanExecutor.isOK()) {
             return appendCommandStatus(result, statusWithPlanExecutor.getStatus());
         }

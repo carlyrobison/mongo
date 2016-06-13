@@ -336,7 +336,9 @@ intrusive_ptr<Expression> Expression::parseExpression(BSONElement exprElement,
                                                       const VariablesParseState& vps) {
     const char* opName = exprElement.fieldName();
     auto op = parserMap.find(opName);
-    uassert(ErrorCodes::InvalidPipelineOperator, str::stream() << "invalid operator '" << opName << "'", op != parserMap.end());
+    uassert(ErrorCodes::InvalidPipelineOperator,
+            str::stream() << "invalid operator '" << opName << "'",
+            op != parserMap.end());
     return op->second(exprElement, vps);
 }
 

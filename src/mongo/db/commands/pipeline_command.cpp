@@ -30,8 +30,8 @@
 
 #include "mongo/platform/basic.h"
 
-#include <vector>
 #include <cctype>
+#include <vector>
 
 #include "mongo/db/auth/action_set.h"
 #include "mongo/db/auth/action_type.h"

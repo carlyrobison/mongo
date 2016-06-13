@@ -52,7 +52,7 @@ namespace mongo {
 
 namespace {
 ViewCatalog* viewCatalogSingleton = new ViewCatalog();
-} // namespace
+}  // namespace
 
 const std::uint32_t ViewCatalog::kMaxViewDepth = 20;
 
@@ -112,7 +112,7 @@ std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(Operation
         if (!view) {
             return std::tie(backingNs, newPipeline);
         }
-        
+
         backingNs = view->fullBackingViewNs();
 
         std::vector<BSONObj> oldPipeline = view->pipeline();

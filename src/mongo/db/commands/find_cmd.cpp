@@ -142,7 +142,7 @@ public:
         auto qrStatus = QueryRequest::makeFromFindCommand(nss, cmdObj, isExplain);
         if (!qrStatus.isOK()) {
             return qrStatus.getStatus();
-        } 
+        }
 
         auto& qr = qrStatus.getValue();
 
@@ -164,7 +164,7 @@ public:
                                 str::stream() << "Unsupported in view pipeline: " << e.what()};
                     }
                     return e.toStatus();
-                } 
+                }
                 return Status::OK();
             }
         }
@@ -227,7 +227,7 @@ public:
         }
 
         auto& qr = qrStatus.getValue();
-            
+
         // Check if this query is being performed on a view.
         if (ViewCatalog::getInstance()->lookup(nss.ns())) {
             Status viewValidationStatus = qr->validateForView();
@@ -241,11 +241,13 @@ public:
                 } catch (DBException& e) {
                     auto errorCode = e.getCode();
                     if (errorCode == ErrorCodes::InvalidPipelineOperator) {
-                        return appendCommandStatus(result, {ErrorCodes::InvalidPipelineOperator,
-                                                            str::stream() << "Unsupported in view pipeline: " << e.what()});
+                        return appendCommandStatus(
+                            result,
+                            {ErrorCodes::InvalidPipelineOperator,
+                             str::stream() << "Unsupported in view pipeline: " << e.what()});
                     }
                     return appendCommandStatus(result, e.toStatus());
-                } 
+                }
                 return true;
             }
         }

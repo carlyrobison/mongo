@@ -190,7 +190,7 @@ public:
             }
             std::string errmsg;
             BSONObj agg = qr->asAggregationCommand("distinct");
-            Command *c = Command::findCommand("aggregate");
+            Command* c = Command::findCommand("aggregate");
             try {
                 c->run(txn, dbname, agg, 0, errmsg, *out);
             } catch (DBException& e) {
@@ -200,7 +200,7 @@ public:
                             str::stream() << "Unsupported in view pipeline: " << e.what()};
                 }
                 return e.toStatus();
-            } 
+            }
             return Status::OK();
         }
 
@@ -241,17 +241,19 @@ public:
                 return appendCommandStatus(result, viewValidationStatus);
             }
             BSONObj agg = qr->asAggregationCommand("distinct");
-            Command *c = Command::findCommand("aggregate");
+            Command* c = Command::findCommand("aggregate");
             try {
                 c->run(txn, dbname, agg, options, errmsg, result);
             } catch (DBException& e) {
                 auto errorCode = e.getCode();
                 if (errorCode == ErrorCodes::InvalidPipelineOperator) {
-                    return appendCommandStatus(result, {ErrorCodes::InvalidPipelineOperator,
-                                                        str::stream() << "Unsupported in view pipeline: " << e.what()});
+                    return appendCommandStatus(
+                        result,
+                        {ErrorCodes::InvalidPipelineOperator,
+                         str::stream() << "Unsupported in view pipeline: " << e.what()});
                 }
                 return appendCommandStatus(result, e.toStatus());
-            } 
+            }
             return true;
         }
 

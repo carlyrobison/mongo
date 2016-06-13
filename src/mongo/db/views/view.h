@@ -48,7 +48,10 @@ class BSONObj;
 // Represents a "view"; that is, a visible subset of a collection or another view.
 class ViewDefinition {
 public:
-    ViewDefinition(std::string dbName, std::string viewName, std::string backingViewName, BSONObj& pipeline);
+    ViewDefinition(std::string dbName,
+                   std::string viewName,
+                   std::string backingViewName,
+                   BSONObj& pipeline);
 
     StringData name() const {
         return StringData(_viewName);
@@ -85,8 +88,7 @@ public:
     // Just for debugging right now
     std::string toString() {
         str::stream ss;
-        ss << "{name: " << _viewName << " options: {view: " << _backingViewName
-           << ", pipeline: [";
+        ss << "{name: " << _viewName << " options: {view: " << _backingViewName << ", pipeline: [";
         for (size_t i = 0; i < _pipeline.size(); i++) {
             ss << _pipeline[i].toString();
             if (i != _pipeline.size() - 1) {
@@ -100,8 +102,9 @@ public:
 private:
     stdx::mutex _mutex;
     std::string _dbName;
-    std::string _viewName;         // The namespace of the view.
-    std::string _backingViewName;  // The namespace of the view/collection upon which the view is based.
+    std::string _viewName;  // The namespace of the view.
+    std::string
+        _backingViewName;  // The namespace of the view/collection upon which the view is based.
     std::vector<BSONObj> _pipeline;
 };
 }  // namespace mongo

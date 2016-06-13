@@ -89,10 +89,8 @@
 #include "mongo/db/s/operation_sharding_state.h"
 #include "mongo/db/s/sharding_state.h"
 #include "mongo/db/server_parameters.h"
-#include "mongo/db/write_concern.h"
 #include "mongo/db/views/view_catalog.h"
-#include "mongo/rpc/request_interface.h"
-#include "mongo/rpc/reply_builder_interface.h"
+#include "mongo/db/write_concern.h"
 #include "mongo/rpc/metadata.h"
 #include "mongo/rpc/metadata/config_server_metadata.h"
 #include "mongo/rpc/metadata/repl_set_metadata.h"
@@ -100,6 +98,8 @@
 #include "mongo/rpc/metadata/sharding_metadata.h"
 #include "mongo/rpc/protocol.h"
 #include "mongo/rpc/reply_builder_interface.h"
+#include "mongo/rpc/reply_builder_interface.h"
+#include "mongo/rpc/request_interface.h"
 #include "mongo/rpc/request_interface.h"
 #include "mongo/s/chunk_version.h"
 #include "mongo/s/client/shard_registry.h"
@@ -1544,12 +1544,11 @@ bool Command::run(OperationContext* txn,
     const NamespaceString nss(parseNs(db, cmd));
 
     if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-        if (cmd.hasField("insert") || cmd.hasField("update") || 
-            cmd.hasField("delete") || cmd.hasField("findAndModify")) {
-            auto result = appendCommandStatus(
-                inPlaceReplyBob,
-                {ErrorCodes::CommandNotSupportedOnView,
-                 str::stream() << "Command not supported on views."});
+        if (cmd.hasField("insert") || cmd.hasField("update") || cmd.hasField("delete") ||
+            cmd.hasField("findAndModify")) {
+            auto result = appendCommandStatus(inPlaceReplyBob,
+                                              {ErrorCodes::CommandNotSupportedOnView,
+                                               str::stream() << "Command not supported on views."});
             inPlaceReplyBob.doneFast();
             replyBuilder->setMetadata(rpc::makeEmptyMetadata());
             return result;

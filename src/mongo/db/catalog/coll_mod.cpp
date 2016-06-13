@@ -142,7 +142,8 @@ Status collMod(OperationContext* txn,
             }
         } else if (str::equals("validator", e.fieldName())) {
             if (view) {
-                errorStatus = Status(ErrorCodes::InvalidOptions, "cannot modify validation options on a view");
+                errorStatus = Status(ErrorCodes::InvalidOptions,
+                                     "cannot modify validation options on a view");
                 continue;
             }
 
@@ -151,7 +152,8 @@ Status collMod(OperationContext* txn,
                 errorStatus = std::move(status);
         } else if (str::equals("validationLevel", e.fieldName())) {
             if (view) {
-                errorStatus = Status(ErrorCodes::InvalidOptions, "cannot modify validation options on a view");
+                errorStatus = Status(ErrorCodes::InvalidOptions,
+                                     "cannot modify validation options on a view");
                 continue;
             }
 
@@ -160,7 +162,8 @@ Status collMod(OperationContext* txn,
                 errorStatus = std::move(status);
         } else if (str::equals("validationAction", e.fieldName())) {
             if (view) {
-                errorStatus = Status(ErrorCodes::InvalidOptions, "cannot modify validation options on a view");
+                errorStatus = Status(ErrorCodes::InvalidOptions,
+                                     "cannot modify validation options on a view");
                 continue;
             }
 
@@ -169,18 +172,21 @@ Status collMod(OperationContext* txn,
                 errorStatus = std::move(status);
         } else if (str::equals("pipeline", e.fieldName())) {
             if (!view) {
-                errorStatus = Status(ErrorCodes::InvalidOptions, "'pipeline' option only supported on a view");
+                errorStatus = Status(ErrorCodes::InvalidOptions,
+                                     "'pipeline' option only supported on a view");
                 continue;
             }
             if (!e.isABSONObj()) {
-                errorStatus = Status(ErrorCodes::InvalidOptions, "not a valid aggregation pipeline");
+                errorStatus =
+                    Status(ErrorCodes::InvalidOptions, "not a valid aggregation pipeline");
                 continue;
             }
             // TODO: need to parse this pipeline to verify that it's legal
             view->changePipeline(e.Obj());
         } else if (str::equals("view", e.fieldName())) {
             if (!view) {
-                errorStatus = Status(ErrorCodes::InvalidOptions, "'view' option only supported on a view");
+                errorStatus =
+                    Status(ErrorCodes::InvalidOptions, "'view' option only supported on a view");
                 continue;
             }
             if (e.type() != mongo::String) {
