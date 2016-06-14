@@ -2,32 +2,97 @@
 
 (function() {
     "use strict";
+
+    // For arrayEq.
     load("jstests/aggregation/extras/utils.js");
 
-    var coll = db.getSiblingDB("views_basic").coll;
+    let viewsDB = db.getSiblingDB("views_basic");
+    assert.commandWorked(viewsDB.dropDatabase());
+
+    let assertCmdResultEq = function (cmd, expected) {
+        let res = viewsDB.runCommand(cmd);
+        assert.commandWorked(res);
+
+        let cursor = new DBCommandCursor(db.getMongo(), res, 5);
+        assert(arrayEq(cursor.toArray(), expected));
+    };
 
     // Insert some control documents.
-    var bulk = coll.initializeUnorderedBulkOp();
-    bulk.insert({user: "foo", state: "CA"});
-    bulk.insert({user: "bar", state: "NY"});
-    bulk.insert({user: "qux", state: "NY"});
+    let coll = viewsDB.getCollection("collection");
+    let bulk = coll.initializeUnorderedBulkOp();
+    bulk.insert( { _id: "New York", state: "NY", pop: 7 } );
+    bulk.insert( { _id: "Oakland", state: "CA", pop: 3 } );
+    bulk.insert( { _id: "Palo Alto", state: "CA", pop: 10 } );
+    bulk.insert( { _id: "San Francisco", state: "CA", pop: 4 } );
+    bulk.insert( { _id: "Trenton", state: "NJ", pop: 5 } );
     assert.writeOK(bulk.execute());
 
-    // TODO: Test view creation.
-    // assert.commandWorked(db.runCommand(
-    //    {create: "new_york", view: "views_basic.coll", pipeline: [{$match: {state: "NY"}}]}));
-    // TODO: Shell helper version:
-    // assert.commandWorked(db.createView("new_york", {view: "views_basic.coll", pipeline: [{$match:
-    // {state: "NY"}}]});
+    // Test creating views on both collections and other views, using the database command and the
+    // shell helper.
+    assert.commandWorked(viewsDB.runCommand(
+        {
+            create: "californiaCities",
+            view: "collection",
+            pipeline: [
+                { $match: { state: "CA" } }
+            ]
+        }
+    ));
+    assert.commandWorked(viewsDB.createView(
+        "largeCaliforniaCities",
+        {
+            view: "californiaCities",
+            pipeline: [
+                { $match: { pop: { $gte: 10 } } },
+                { $sort: { pop: 1 } }
+            ]
+        }
+    ));
 
     // Perform a simple count.
-    var newYorkView = db.getSiblingDB("views_basic").new_york;
-    // assert.eq(2, newYorkView.count());
+    let californiaView = viewsDB.getCollection("californiaCities");
+    assert.eq(3, californiaView.count());
 
-    // Test aggregation pipeline concatenation.
-    var result =
-        newYorkView
-            .aggregate([{$project: {_id: 0, user: 1, state: 1}}, {$sort: {user: 1}}, {$limit: 1}])
-            .toArray();
-    assert(arrayEq(result, [{user: "bar", state: "NY"}]));
+    // Use the find command on a view with various options.
+    assertCmdResultEq(
+        {
+            find: "californiaCities",
+            filter: {},
+            projection: { _id: 1, pop: 1 }
+        },
+        [
+            { _id: "Oakland", pop: 3 },
+            { _id: "Palo Alto", pop: 10 },
+            { _id: "San Francisco", pop: 4 }
+        ]
+    );
+    assertCmdResultEq(
+        {
+            find: "largeCaliforniaCities",
+            filter: { pop: { $lt: 50 } },
+            limit: 1
+        },
+        [
+            { _id: "Palo Alto", state: "CA", pop: 10 }
+        ]
+    );
+
+    // Use aggregation on a view.
+    assertCmdResultEq(
+        {
+            aggregate: "californiaCities",
+            pipeline: [
+                {
+                    $group : {
+                        _id: "$state",
+                        totalPop: { $sum: "$pop" }
+                    }
+                }
+            ],
+            cursor: {}
+        },
+        [
+            { _id: "CA", totalPop: 17 }
+        ]
+    );
 }());
