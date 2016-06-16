@@ -36,7 +36,6 @@
 
 #include <map>
 #include <memory>
-#include <mutex>
 #include <tuple>
 
 #include "mongo/base/string_data.h"
@@ -62,27 +61,20 @@ ViewCatalog* ViewCatalog::getInstance() {
 }
 
 Status ViewCatalog::createView(OperationContext* txn,
-                               std::string dbName,
-                               std::string viewName,
-                               std::string backingViewName,
-                               BSONObj& pipeline) {
-    std::string ns = generateViewNamespace(dbName, viewName);
-    if (ViewCatalog::lookup(StringData(ns))) {
+                               const NamespaceString& viewName,
+                               const std::string& viewOn,
+                               const BSONObj& pipeline) {
+    NamespaceString viewNss(viewName.db(), viewOn);
+    if (lookup(StringData(viewName.ns()))) {
         LOG(3) << "VIEWS: Attempted to create a duplicate view";
         return Status(ErrorCodes::NamespaceExists, "Namespace already exists");
     }
 
-    _viewMap[ns] = new ViewDefinition(dbName, viewName, backingViewName, pipeline);
+    _viewMap[viewName.ns()] = new ViewDefinition(viewName.db(), viewName.coll(), viewOn, pipeline);
     return Status::OK();
 }
 
-std::string ViewCatalog::generateViewNamespace(StringData dbName, StringData viewName) {
-    return dbName.toString() + "." + viewName.toString();
-}
-
-
 ViewDefinition* ViewCatalog::lookup(StringData ns) {
-
     ViewMap::const_iterator it = _viewMap.find(ns);
     if (it != _viewMap.end() && it->second) {
         return it->second;
@@ -95,7 +87,7 @@ void ViewCatalog::removeFromCatalog(StringData fullNs) {
 }
 
 ViewDefinition* ViewCatalog::lookup(StringData dbName, StringData viewName) {
-    return lookup(generateViewNamespace(dbName, viewName));
+    return lookup(StringData(NamespaceString(dbName, viewName).ns()));
 }
 
 std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(OperationContext* txn,

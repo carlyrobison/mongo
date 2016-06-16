@@ -48,10 +48,10 @@ class BSONObj;
 // Represents a "view"; that is, a visible subset of a collection or another view.
 class ViewDefinition {
 public:
-    ViewDefinition(std::string dbName,
-                   std::string viewName,
-                   std::string backingViewName,
-                   BSONObj& pipeline);
+    ViewDefinition(StringData dbName,
+                   StringData viewName,
+                   StringData backingViewName,
+                   const BSONObj& pipeline);
 
     StringData name() const {
         return StringData(_viewName);

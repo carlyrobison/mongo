@@ -64,6 +64,7 @@
 #include "mongo/db/storage/storage_engine.h"
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/db/views/view_catalog.h"
+#include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -511,6 +512,21 @@ Collection* Database::createCollection(OperationContext* txn,
     uassert(17316, "cannot create a blank collection", nss.coll() > 0);
     uassert(28838, "cannot create a non-capped oplog collection", options.capped || !nss.isOplog());
 
+    // If "view" is specified, create a new view. Otherwise, default to creating a collection.
+    if (options.isView()) {
+        invariant(!createIdIndex);
+        uassert(ErrorCodes::InvalidNamespace,
+                "invalid namespace name for a view: " + nss.toString(),
+                !nss.isOplog());
+        // ns is fully-qualified already, but viewNs is not. Append the database name.
+        uassertStatusOK(ViewCatalog::getInstance()->createView(
+            txn, nss, options.viewNamespace, options.pipeline));
+
+        LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
+               << options.viewNamespace << " with pipeline " << options.pipeline;
+        audit::logCreateCollection(&cc(), ns);
+        return nullptr;
+    }
     audit::logCreateCollection(&cc(), ns);
 
     txn->recoveryUnit()->registerChange(new AddCollectionChange(txn, this, ns));
@@ -616,12 +632,13 @@ Status userCreateNS(OperationContext* txn,
     Collection* collection = db->getCollection(ns);
 
     if (collection)
-        return Status(ErrorCodes::NamespaceExists, "collection already exists");
+        return Status(ErrorCodes::NamespaceExists,
+                      "a collection '" + ns.toString() + "' already exists");
 
     ViewDefinition* view = ViewCatalog::getInstance()->lookup(ns);
 
     if (view)
-        return Status(ErrorCodes::NamespaceExists, "view already exists");
+        return Status(ErrorCodes::NamespaceExists, "a view '" + ns.toString() + "' already exists");
 
     CollectionOptions collectionOptions;
     Status status = collectionOptions.parse(options);
@@ -667,29 +684,10 @@ Status userCreateNS(OperationContext* txn,
         }
     }
 
-    // If "view" is specified, create a new view. Otherwise, default to creating a collection.
-    std::string backingViewName = collectionOptions.viewNamespace;
-    if (!backingViewName.empty()) {
-        if (collectionOptions.pipeline.isEmpty())
-            return Status(ErrorCodes::BadValue,
-                          "must define an aggregation pipeline to create a view");
-
-        NamespaceString nss(ns);
-        std::string viewName = nss.coll().toString();
-        std::string dbName = nss.db().toString();
-
-        LOG(3) << "VIEWS: userCreateNS attempting to create " << viewName << " as a view on "
-               << backingViewName << " with pipeline " << collectionOptions.pipeline;
-        return ViewCatalog::getInstance()->createView(
-            txn, dbName, viewName, backingViewName, collectionOptions.pipeline);
-    } else {
-        if (!collectionOptions.pipeline.isEmpty())
-            return Status(ErrorCodes::BadValue,
-                          "'pipeline' option can only be used when creating a view");
-
-        LOG(3) << "VIEWS: userCreateNS detecting an ordinary create collection command";
-        invariant(db->createCollection(txn, ns, collectionOptions, createDefaultIndexes));
-    }
+    invariant(
+        db->createCollection(
+            txn, ns, collectionOptions, createDefaultIndexes && !collectionOptions.isView()) ||
+        collectionOptions.isView());
 
     return Status::OK();
 }

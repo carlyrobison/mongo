@@ -114,6 +114,10 @@ bool CollectionOptions::isValid() const {
     return validate().isOK();
 }
 
+bool CollectionOptions::isView() const {
+    return !viewNamespace.empty();
+}
+
 Status CollectionOptions::validate() const {
     return CollectionOptions().parse(toBSON());
 }
@@ -236,6 +240,9 @@ Status CollectionOptions::parse(const BSONObj& options) {
             pipeline = e.Obj().getOwned();
         }
     }
+    uassert(ErrorCodes::InvalidOptions,
+            "'pipeline' cannot be specified without 'view'",
+            !viewNamespace.empty() || pipeline.isEmpty());
 
     return Status::OK();
 }

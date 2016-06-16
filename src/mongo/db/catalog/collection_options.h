@@ -48,6 +48,11 @@ struct CollectionOptions {
     bool isValid() const;
 
     /**
+     * Returns true if the options indicate the namespace is a view.
+     */
+    bool isView() const;
+
+    /**
      * Confirms that collection options can be converted to BSON and back without errors.
      */
     Status validate() const;

@@ -32,6 +32,7 @@
 
 #include <map>
 #include <memory>
+#include <string>
 #include <tuple>
 
 #include "mongo/base/status.h"
@@ -106,8 +107,6 @@ public:
      */
     static ViewCatalog* getInstance();
 
-    static std::string generateViewNamespace(StringData dbName, StringData viewName);
-
     iterator begin() const {
         return iterator(_viewMap.begin());
     }
@@ -120,10 +119,9 @@ public:
      * Create a new view.
      */
     Status createView(OperationContext* txn,
-                      std::string dbName,
-                      std::string viewName,
-                      std::string backingName,
-                      BSONObj& pipeline);
+                      const NamespaceString& viewName,
+                      const std::string& viewOn,
+                      const BSONObj& pipeline);
 
     /**
      * Drop a view. Requires a fully qualified namespace
