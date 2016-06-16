@@ -38,6 +38,7 @@
 #include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/s/collection_sharding_state.h"
 #include "mongo/db/stats/top.h"
+#include "mongo/db/views/view_catalog.h"
 
 namespace mongo {
 
@@ -55,7 +56,11 @@ AutoGetCollection::AutoGetCollection(OperationContext* txn,
                                      LockMode modeColl)
     : _autoDb(txn, nss.db(), modeDB),
       _collLock(txn->lockState(), nss.ns(), modeColl),
-      _coll(_autoDb.getDb() ? _autoDb.getDb()->getCollection(nss) : nullptr) {}
+      _coll(_autoDb.getDb() ? _autoDb.getDb()->getCollection(nss) : nullptr) {
+    uassert(ErrorCodes::CommandNotSupportedOnView,
+            "Namespace " + nss.ns() + " is a view, not a collection",
+            !ViewCatalog::getInstance()->lookup(nss.ns()));
+}
 
 AutoGetOrCreateDb::AutoGetOrCreateDb(OperationContext* txn, StringData ns, LockMode mode)
     : _transaction(txn, MODE_IX),
@@ -136,6 +141,108 @@ void AutoGetCollectionForRead::_ensureMajorityCommittedSnapshotIsValid(const Nam
         }
 
         // Yield locks.
+        _autoColl = boost::none;
+
+        repl::ReplicationCoordinator::get(_txn)->waitUntilSnapshotCommitted(_txn, *minSnapshot);
+
+        uassertStatusOK(_txn->recoveryUnit()->setReadFromMajorityCommittedSnapshot());
+
+        {
+            stdx::lock_guard<Client> lk(*_txn->getClient());
+            CurOp::get(_txn)->yielded();
+        }
+
+        // Relock.
+        _autoColl.emplace(_txn, nss, MODE_IS);
+    }
+}
+
+AutoGetCollectionOrViewForRead::AutoGetCollectionOrViewForRead(OperationContext* txn,
+                                                               const std::string& ns)
+    : AutoGetCollectionOrViewForRead(txn, NamespaceString(ns)) {}
+
+AutoGetCollectionOrViewForRead::AutoGetCollectionOrViewForRead(OperationContext* txn,
+                                                               const NamespaceString& nss)
+    : _txn(txn), _transaction(txn, MODE_IS), _autoColl(boost::none), _viewDefinition(nullptr) {
+    _autoDb.emplace(txn, nss.db(), MODE_IS);
+
+    // The database is now locked in MODE_IS, so first check for the existence of a view.
+    _viewDefinition = ViewCatalog::getInstance()->lookup(nss.ns());
+    if (_viewDefinition) {
+        // We're done. Skip all of the collection-level stuff.
+        return;
+    }
+    {
+        // A view does not exist. Unlock the database and have the AutoGetCollection manage locks
+        // from now on.
+        unlock();
+
+        _autoColl.emplace(txn, nss, MODE_IS);
+        auto curOp = CurOp::get(_txn);
+        stdx::lock_guard<Client> lk(*_txn->getClient());
+
+        // TODO: OldClientContext legacy, needs to be removed
+        curOp->ensureStarted();
+        curOp->setNS_inlock(nss.ns());
+
+        if (_autoColl->getDb()) {
+            // TODO: OldClientContext legacy, needs to be removed
+            curOp->enter_inlock(nss.ns().c_str(), _autoColl->getDb()->getProfilingLevel());
+        }
+    }
+
+    // Note: this can yield.
+    _ensureMajorityCommittedSnapshotIsValid(nss);
+
+    // We have both the DB and collection locked, which is the prerequisite to do a stable shard
+    // version check, but we'd like to do the check after we have a satisfactory snapshot.
+    auto css = CollectionShardingState::get(txn, nss);
+    css->checkShardVersionOrThrow(txn);
+}
+
+AutoGetCollectionOrViewForRead::~AutoGetCollectionOrViewForRead() {
+    // Report time spent in read lock
+    auto currentOp = CurOp::get(_txn);
+    Top::get(_txn->getClient()->getServiceContext())
+        .record(currentOp->getNS(),
+                currentOp->getLogicalOp(),
+                -1,  // "read locked"
+                _timer.micros(),
+                currentOp->isCommand());
+
+    unlock();
+}
+
+void AutoGetCollectionOrViewForRead::unlock() noexcept {
+    _viewDefinition = nullptr;
+    _autoDb = boost::none;
+    _autoColl = boost::none;
+}
+
+void AutoGetCollectionOrViewForRead::_ensureMajorityCommittedSnapshotIsValid(
+    const NamespaceString& nss) {
+    // TODO: Might need to expose this functionality higher up. Look at this later.
+    while (true) {
+        if (_autoColl == boost::none) {
+            return;
+        }
+        auto coll = _autoColl->getCollection();
+        if (!coll) {
+            return;
+        }
+        auto minSnapshot = coll->getMinimumVisibleSnapshot();
+        if (!minSnapshot) {
+            return;
+        }
+        auto mySnapshot = _txn->recoveryUnit()->getMajorityCommittedSnapshot();
+        if (!mySnapshot) {
+            return;
+        }
+        if (mySnapshot >= minSnapshot) {
+            return;
+        }
+
+        // Yield the collection lock.
         _autoColl = boost::none;
 
         repl::ReplicationCoordinator::get(_txn)->waitUntilSnapshotCommitted(_txn, *minSnapshot);

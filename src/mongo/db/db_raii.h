@@ -35,6 +35,7 @@
 #include "mongo/db/concurrency/d_concurrency.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/operation_context.h"
+#include "mongo/db/views/view.h"
 #include "mongo/util/timer.h"
 
 namespace mongo {
@@ -156,13 +157,61 @@ public:
     }
 
 private:
-    void _init(const std::string& ns, StringData coll);
     void _ensureMajorityCommittedSnapshotIsValid(const NamespaceString& nss);
 
     const Timer _timer;
     OperationContext* const _txn;
     const ScopedTransaction _transaction;
     boost::optional<AutoGetCollection> _autoColl;
+};
+
+/**
+ * RAII-style class for obtaining a collection or view for reading. The pointer to a view definition
+ * is nullptr if it does not exist.
+ */
+class AutoGetCollectionOrViewForRead {
+    MONGO_DISALLOW_COPYING(AutoGetCollectionOrViewForRead);
+
+public:
+    AutoGetCollectionOrViewForRead(OperationContext* txn, const std::string& ns);
+    AutoGetCollectionOrViewForRead(OperationContext* txn, const NamespaceString& nss);
+    ~AutoGetCollectionOrViewForRead();
+
+    Database* getDb() const {
+        if (_autoDb == boost::none) {
+            // The database handle is controlled by the AutoGetCollection.
+            invariant(_autoColl != boost::none);
+            return _autoColl->getDb();
+        } else {
+            // We possibly have a view, so we're managing the database handle ourselves.
+            return _autoDb->getDb();
+        }
+    }
+
+    Collection* getCollection() const {
+        return _autoColl->getCollection();
+    }
+
+    ViewDefinition* getView() const {
+        return _viewDefinition;
+    }
+
+    /**
+     * Unlock this view or collection and release all resources. After calling unlock, you may no
+     * longer call getDb() or getCollection().
+     */
+    void unlock() noexcept;
+
+private:
+    void _ensureMajorityCommittedSnapshotIsValid(const NamespaceString& nss);
+
+    const Timer _timer;
+    OperationContext* const _txn;
+    const ScopedTransaction _transaction;
+
+    boost::optional<AutoGetDb> _autoDb;
+    boost::optional<AutoGetCollection> _autoColl;
+    ViewDefinition* _viewDefinition;
 };
 
 /**
