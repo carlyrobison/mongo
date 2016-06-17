@@ -22,14 +22,8 @@ function validateCollections(db, obj) {
     var success = true;
 
     // Don't run validate on view namespaces.
-    let listCollectionsRes = db.runCommand(
-        {
-            listCollections: 1,
-            filter: {
-                "options.view": { $exists: false }
-            }
-        }
-    );
+    let listCollectionsRes =
+        db.runCommand({listCollections: 1, filter: {"options.view": {$exists: false}}});
     assert.commandWorked(listCollectionsRes);
     let collInfo = new DBCommandCursor(db.getMongo(), listCollectionsRes).toArray();
 
