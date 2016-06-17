@@ -40,13 +40,11 @@
     ));
     assert.commandWorked(viewsDB.createView(
         "largeCaliforniaCities",
-        {
-            viewOn: "californiaCities",
-            pipeline: [
+         "californiaCities",
+            [
                 { $match: { pop: { $gte: 10 } } },
                 { $sort: { pop: 1 } }
             ]
-        }
     ));
 
     // Perform a simple count.

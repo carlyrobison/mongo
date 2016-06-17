@@ -238,7 +238,7 @@ var DB;
 
     /**
      * Command to create a view based on the specified aggregation pipeline.
-     * Usage: db.createView(name, {viewOn: ..., pipeline: [{...}]})
+     * Usage: db.createView(name, viewOn, pipeline: [{...}])
      *
      *  @param {String} name Name of the new view to create
      *  @param {Object} options Object with options for call. Option object is
@@ -248,16 +248,14 @@ var DB;
                 pipeline: [{...}] - the aggregation pipeline that defines the view
             }
      */
-    DB.prototype.createView = function(name, opt) {
+    DB.prototype.createView = function(name, viewOn, pipeline, opt) {
         var options = opt || {};
 
         var cmd = {create: name};
 
-        if (options.viewOn == undefined) {
+        if (viewOn == undefined) {
             throw Error("Must specify a backing view or collection");
         }
-
-        var pipeline = options.pipeline;
 
         // Since we allow a single stage pipeline to be specified as an object
         // in aggregation, we need to account for that here for consistency.
@@ -267,6 +265,8 @@ var DB;
                 options.pipeline = pipeline;
             }
         }
+        options.pipeline = pipeline;
+        options.viewOn = viewOn;
 
         Object.extend(cmd, options);
 
