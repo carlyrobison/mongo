@@ -130,7 +130,7 @@ BSONObj buildViewBson(const ViewDefinition* view) {
 
     BSONObjBuilder b;
     b.append("name", view->name());
-    BSONObj options = BSON("view" << view->backingViewName() << "pipeline" << view->pipeline());
+    BSONObj options = BSON("viewOn" << view->viewOn() << "pipeline" << view->pipeline());
     b.append("options", options);
     return b.obj();
 }

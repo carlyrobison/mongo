@@ -24,7 +24,7 @@
         assert.commandWorked(viewDB.runCommand(
             {
                 create: "view",
-                view: "collection",
+                viewOn: "collection",
                 projection: { _id: 0 },
                 pipeline: [{ $match: { a: 1 } }]
             }
@@ -32,7 +32,7 @@
         assert.commandWorked(viewDB.runCommand(
             {
                 create: "viewOnView",
-                view: "view",
+                viewOn: "view",
                 pipeline: [{ $match: { b: 1 } }]
             }
         ));

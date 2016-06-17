@@ -32,7 +32,7 @@
     assert.commandWorked(viewsDB.runCommand(
         {
             create: "californiaCities",
-            view: "collection",
+            viewOn: "collection",
             pipeline: [
                 { $match: { state: "CA" } }
             ]
@@ -41,7 +41,7 @@
     assert.commandWorked(viewsDB.createView(
         "largeCaliforniaCities",
         {
-            view: "californiaCities",
+            viewOn: "californiaCities",
             pipeline: [
                 { $match: { pop: { $gte: 10 } } },
                 { $sort: { pop: 1 } }

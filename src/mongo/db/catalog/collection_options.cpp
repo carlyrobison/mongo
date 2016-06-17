@@ -226,9 +226,9 @@ Status CollectionOptions::parse(const BSONObj& options) {
             }
 
             collation = e.Obj().getOwned();
-        } else if (fieldName == "view") {
+        } else if (fieldName == "viewOn") {
             if (e.type() != mongo::String) {
-                return Status(ErrorCodes::BadValue, "'view' has to be a string.");
+                return Status(ErrorCodes::BadValue, "'viewOn' has to be a string.");
             }
 
             viewNamespace = e.String();
@@ -241,7 +241,7 @@ Status CollectionOptions::parse(const BSONObj& options) {
         }
     }
     uassert(ErrorCodes::InvalidOptions,
-            "'pipeline' cannot be specified without 'view'",
+            "'pipeline' cannot be specified without 'viewOn'",
             !viewNamespace.empty() || pipeline.isEmpty());
 
     return Status::OK();
@@ -296,7 +296,7 @@ BSONObj CollectionOptions::toBSON() const {
     }
 
     if (!viewNamespace.empty()) {
-        b.append("view", viewNamespace);
+        b.append("viewOn", viewNamespace);
     }
 
     if (!pipeline.isEmpty()) {

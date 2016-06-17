@@ -183,14 +183,15 @@ Status collMod(OperationContext* txn,
             }
             // TODO: need to parse this pipeline to verify that it's legal
             view->changePipeline(e.Obj());
-        } else if (str::equals("view", e.fieldName())) {
+        } else if (str::equals("viewOn", e.fieldName())) {
             if (!view) {
                 errorStatus =
-                    Status(ErrorCodes::InvalidOptions, "'view' option only supported on a view");
+                    Status(ErrorCodes::InvalidOptions, "'viewOn' option only supported on a view");
                 continue;
             }
             if (e.type() != mongo::String) {
-                errorStatus = Status(ErrorCodes::InvalidOptions, "'view' option must be a string");
+                errorStatus =
+                    Status(ErrorCodes::InvalidOptions, "'viewOn' option must be a string");
                 continue;
             }
             view->changeBackingNs(e.str());

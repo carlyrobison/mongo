@@ -47,11 +47,11 @@ namespace mongo {
 
 ViewDefinition::ViewDefinition(StringData dbName,
                                StringData viewName,
-                               StringData backingViewName,
+                               StringData viewOn,
                                const BSONObj& pipeline)
     : _dbName(dbName.toString()),
       _viewName(viewName.toString()),
-      _backingViewName(backingViewName.toString()) {
+      _backingViewName(viewOn.toString()) {
     for (BSONElement e : pipeline) {
         _pipeline.push_back(e.Obj().getOwned());
     }

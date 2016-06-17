@@ -10,7 +10,7 @@
     assert.commandWorked(viewsDB.runCommand(
         {
             create: "view",
-            view: "nonexistent",
+            viewOn: "nonexistent",
             pipeline: [{ $match: {} }]
         }
     ));

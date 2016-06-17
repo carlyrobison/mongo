@@ -105,7 +105,7 @@ std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(Operation
             return std::tie(backingNs, newPipeline);
         }
 
-        backingNs = view->fullBackingViewNs();
+        backingNs = view->fullViewOnNs();
 
         std::vector<BSONObj> oldPipeline = view->pipeline();
         newPipeline.insert(newPipeline.end(), oldPipeline.begin(), oldPipeline.end());

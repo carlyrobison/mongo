@@ -50,14 +50,14 @@ class ViewDefinition {
 public:
     ViewDefinition(StringData dbName,
                    StringData viewName,
-                   StringData backingViewName,
+                   StringData viewOn,
                    const BSONObj& pipeline);
 
     StringData name() const {
         return StringData(_viewName);
     }
 
-    StringData backingViewName() const {
+    StringData viewOn() const {
         return StringData(_backingViewName);
     }
 
@@ -69,7 +69,7 @@ public:
         return _dbName + "." + _viewName;
     }
 
-    std::string fullBackingViewNs() const {
+    std::string fullViewOnNs() const {
         return _dbName + "." + _backingViewName;
     }
 

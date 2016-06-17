@@ -512,7 +512,7 @@ Collection* Database::createCollection(OperationContext* txn,
     uassert(17316, "cannot create a blank collection", nss.coll() > 0);
     uassert(28838, "cannot create a non-capped oplog collection", options.capped || !nss.isOplog());
 
-    // If "view" is specified, create a new view. Otherwise, default to creating a collection.
+    // If "viewOn" is specified, create a new view. Otherwise, default to creating a collection.
     if (options.isView()) {
         invariant(!createIdIndex);
         uassert(ErrorCodes::InvalidNamespace,
