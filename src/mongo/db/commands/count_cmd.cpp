@@ -110,6 +110,8 @@ public:
 
         // Are we counting on a view?
         if (ctx.getView()) {
+            ctx.unlock();
+
             auto query = qr.get();
             Status viewValidationStatus = query->validateForView();
             if (!viewValidationStatus.isOK()) {

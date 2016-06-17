@@ -187,6 +187,8 @@ public:
 
         // Are we counting on a view?
         if (ctx.getView()) {
+            ctx.unlock();
+
             Status viewValidationStatus = qr->validateForView();
             if (!viewValidationStatus.isOK()) {
                 return viewValidationStatus;
