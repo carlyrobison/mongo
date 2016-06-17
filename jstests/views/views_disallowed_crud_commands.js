@@ -11,10 +11,9 @@
         viewsDB.runCommand({create: "view", viewOn: "nonexistent", pipeline: [{$match: {}}]}));
 
     // Cannot do read-only operations on a view.
-    assert.commandFailed(viewsDB.runCommand({insert: "view", documents: [{a: 1}]}));
-    assert.commandFailed(
-        viewsDB.runCommand({update: "view", updates: [{q: {a: 1}, u: {$set: {a: 2}}}]}));
-    assert.commandFailed(viewsDB.runCommand({delete: "view", deletes: [{q: {a: 1}, limit: 0}]}));
+    assert.writeError(viewsDB.view.insert({a: 1}));
+    assert.writeError(viewsDB.view.update({a: 1}, {$set: {a: 2}}));
+    assert.writeError(viewsDB.view.remove({a: 1}));
     assert.commandFailed(viewsDB.runCommand({findAndModify: "view", query: {a: 1}, remove: true}));
     assert.commandFailed(
         viewsDB.runCommand({findAndModify: "view", query: {a: 1}, update: {$set: {a: 2}}}));
