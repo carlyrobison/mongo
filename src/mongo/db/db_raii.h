@@ -178,27 +178,21 @@ public:
     ~AutoGetCollectionOrViewForRead();
 
     Database* getDb() const {
-        if (_autoDb == boost::none) {
-            // The database handle is controlled by the AutoGetCollection.
-            invariant(_autoColl != boost::none);
-            return _autoColl->getDb();
-        } else {
-            // We possibly have a view, so we're managing the database handle ourselves.
-            return _autoDb->getDb();
-        }
+        return _db;
     }
 
     Collection* getCollection() const {
-        return _autoColl ? _autoColl->getCollection() : nullptr;
+        return _coll;
     }
 
     ViewDefinition* getView() const {
-        return _viewDefinition;
+        return _view;
     }
 
     /**
-     * Unlock this view or collection and release all resources. After calling unlock, you may no
-     * longer call getDb() or getCollection().
+     * Unlock this view or collection and release all resources.
+     *
+     * Postcondition: the database, collection and view pointers are all nullptr.
      */
     void unlock() noexcept;
 
@@ -209,9 +203,11 @@ private:
     OperationContext* const _txn;
     const ScopedTransaction _transaction;
 
-    boost::optional<AutoGetDb> _autoDb;
-    boost::optional<AutoGetCollection> _autoColl;
-    ViewDefinition* _viewDefinition;
+    boost::optional<Lock::DBLock> _dbLock;
+    boost::optional<Lock::CollectionLock> _collLock;
+    Database* _db;
+    Collection* _coll;
+    ViewDefinition* _view;
 };
 
 /**

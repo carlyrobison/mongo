@@ -164,22 +164,15 @@ AutoGetCollectionOrViewForRead::AutoGetCollectionOrViewForRead(OperationContext*
 
 AutoGetCollectionOrViewForRead::AutoGetCollectionOrViewForRead(OperationContext* txn,
                                                                const NamespaceString& nss)
-    : _txn(txn), _transaction(txn, MODE_IS), _autoColl(boost::none), _viewDefinition(nullptr) {
-    _autoDb.emplace(txn, nss.db(), MODE_IS);
+    : _txn(txn), _transaction(txn, MODE_IS) {
+    _dbLock.emplace(_txn->lockState(), nss.db(), MODE_IS);
+    _db = dbHolder().get(txn, nss.ns());
 
-    // The database is now locked in MODE_IS, so first check for the existence of a view.
-    Database* db = _autoDb->getDb();
-    _viewDefinition = db ? db->getView(nss.ns()) : nullptr;
-    if (_viewDefinition) {
-        // We're done. Skip all of the collection-level stuff.
-        return;
-    }
-    {
-        // A view does not exist. Unlock the database and have the AutoGetCollection manage locks
-        // from now on.
-        unlock();
+    _collLock.emplace(_txn->lockState(), nss.ns(), MODE_IS);
+    _coll = _db ? _db->getCollection(nss) : nullptr;
+    _view = _db ? _db->getView(nss.ns()) : nullptr;
 
-        _autoColl.emplace(txn, nss, MODE_IS);
+    if (!_view) {
         auto curOp = CurOp::get(_txn);
         stdx::lock_guard<Client> lk(*_txn->getClient());
 
@@ -187,9 +180,9 @@ AutoGetCollectionOrViewForRead::AutoGetCollectionOrViewForRead(OperationContext*
         curOp->ensureStarted();
         curOp->setNS_inlock(nss.ns());
 
-        if (_autoColl->getDb()) {
+        if (_db) {
             // TODO: OldClientContext legacy, needs to be removed
-            curOp->enter_inlock(nss.ns().c_str(), _autoColl->getDb()->getProfilingLevel());
+            curOp->enter_inlock(nss.ns().c_str(), _db->getProfilingLevel());
         }
     }
 
@@ -216,23 +209,21 @@ AutoGetCollectionOrViewForRead::~AutoGetCollectionOrViewForRead() {
 }
 
 void AutoGetCollectionOrViewForRead::unlock() noexcept {
-    _viewDefinition = nullptr;
-    _autoDb = boost::none;
-    _autoColl = boost::none;
+    _collLock = boost::none;
+    _dbLock = boost::none;
+    _db = nullptr;
+    _coll = nullptr;
+    _view = nullptr;
 }
 
 void AutoGetCollectionOrViewForRead::_ensureMajorityCommittedSnapshotIsValid(
     const NamespaceString& nss) {
     // TODO: Might need to expose this functionality higher up. Look at this later.
     while (true) {
-        if (_autoColl == boost::none) {
+        if (!_coll) {
             return;
         }
-        auto coll = _autoColl->getCollection();
-        if (!coll) {
-            return;
-        }
-        auto minSnapshot = coll->getMinimumVisibleSnapshot();
+        auto minSnapshot = _coll->getMinimumVisibleSnapshot();
         if (!minSnapshot) {
             return;
         }
@@ -245,7 +236,7 @@ void AutoGetCollectionOrViewForRead::_ensureMajorityCommittedSnapshotIsValid(
         }
 
         // Yield the collection lock.
-        _autoColl = boost::none;
+        _collLock = boost::none;
 
         repl::ReplicationCoordinator::get(_txn)->waitUntilSnapshotCommitted(_txn, *minSnapshot);
 
@@ -257,7 +248,7 @@ void AutoGetCollectionOrViewForRead::_ensureMajorityCommittedSnapshotIsValid(
         }
 
         // Relock.
-        _autoColl.emplace(_txn, nss, MODE_IS);
+        _collLock.emplace(_txn->lockState(), nss.ns(), MODE_IS);
     }
 }
 
