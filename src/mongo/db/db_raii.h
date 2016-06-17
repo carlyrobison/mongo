@@ -189,7 +189,7 @@ public:
     }
 
     Collection* getCollection() const {
-        return _autoColl->getCollection();
+        return _autoColl ? _autoColl->getCollection() : nullptr;
     }
 
     ViewDefinition* getView() const {

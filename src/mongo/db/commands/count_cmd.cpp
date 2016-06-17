@@ -104,8 +104,12 @@ public:
 
         const NamespaceString nss(parseNs(dbname, cmdObj));
 
+        // Acquire the db read lock.
+        AutoGetCollectionOrViewForRead ctx(txn, request.getValue().getNs());
+        Collection* collection = ctx.getCollection();
+
         // Are we counting on a view?
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+        if (ctx.getView()) {
             auto query = qr.get();
             Status viewValidationStatus = query->validateForView();
             if (!viewValidationStatus.isOK()) {
@@ -127,9 +131,6 @@ public:
             return Status::OK();
         }
 
-        // Acquire the db read lock.
-        AutoGetCollectionForRead ctx(txn, request.getValue().getNs());
-        Collection* collection = ctx.getCollection();
 
         // Prevent chunks from being cleaned up during yields - this allows us to only check the
         // version on initial entry into count.
@@ -163,8 +164,13 @@ public:
 
         const NamespaceString nss(parseNs(dbname, cmdObj));
 
+        // Acquire locks.
+        AutoGetCollectionOrViewForRead ctx(txn, nss);
+        Collection* collection = ctx.getCollection();
+
         // Are we counting on a view?
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+        if (ctx.getView()) {
+            ctx.unlock();
             auto query = qr.get();
             Status viewValidationStatus = query->validateForView();
             if (!viewValidationStatus.isOK()) {
@@ -187,9 +193,6 @@ public:
             return true;
         }
 
-        // Acquire locks.
-        AutoGetCollectionForRead ctx(txn, nss);
-        Collection* collection = ctx.getCollection();
 
         // Prevent chunks from being cleaned up during yields - this allows us to only check the
         // version on initial entry into count.

@@ -56,12 +56,6 @@ Status dropCollection(OperationContext* txn,
         log() << "CMD: drop " << collectionName;
     }
 
-    ViewCatalog* vCatalog = ViewCatalog::getInstance();
-    if (vCatalog->lookup(collectionName.ns())) {
-        vCatalog->removeFromCatalog(collectionName.ns());
-        return Status::OK();
-    }
-
     const std::string dbname = collectionName.db().toString();
 
     MONGO_WRITE_CONFLICT_RETRY_LOOP_BEGIN {
@@ -70,9 +64,9 @@ Status dropCollection(OperationContext* txn,
         AutoGetDb autoDb(txn, dbname, MODE_X);
         Database* const db = autoDb.getDb();
         Collection* coll = db ? db->getCollection(collectionName) : nullptr;
+        ViewDefinition* view = db ? db->getView(collectionName.ns()) : nullptr;
 
-        // If db/collection does not exist, short circuit and return.
-        if (!db || !coll) {
+        if (!db || (!coll && !view)) {
             return Status(ErrorCodes::NamespaceNotFound, "ns not found");
         }
 
@@ -88,21 +82,26 @@ Status dropCollection(OperationContext* txn,
                                         << collectionName.ns());
         }
 
-        int numIndexes = coll->getIndexCatalog()->numIndexesTotal(txn);
-
-        BackgroundOperation::assertNoBgOpInProgForNs(collectionName.ns());
-
         WriteUnitOfWork wunit(txn);
-        Status s = db->dropCollection(txn, collectionName.ns());
-
         result.append("ns", collectionName.ns());
 
-        if (!s.isOK()) {
-            return s;
+        if (coll) {
+            invariant(!view);
+            int numIndexes = coll->getIndexCatalog()->numIndexesTotal(txn);
+
+            BackgroundOperation::assertNoBgOpInProgForNs(collectionName.ns());
+
+            Status s = db->dropCollection(txn, collectionName.ns());
+
+            if (!s.isOK()) {
+                return s;
+            }
+
+            result.append("nIndexesWas", numIndexes);
+        } else {
+            invariant(view);
+            db->dropView(txn, collectionName.ns());
         }
-
-        result.append("nIndexesWas", numIndexes);
-
         wunit.commit();
     }
     MONGO_WRITE_CONFLICT_RETRY_LOOP_END(txn, "drop", collectionName.ns());

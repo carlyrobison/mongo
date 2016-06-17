@@ -144,15 +144,28 @@ public:
             return qrStatus.getStatus();
         }
 
-        auto& qr = qrStatus.getValue();
+        // Finish the parsing step by using the QueryRequest to create a CanonicalQuery.
+        ExtensionsCallbackReal extensionsCallback(txn, &nss);
+        auto statusWithCQ =
+            CanonicalQuery::canonicalize(txn, std::move(qrStatus.getValue()), extensionsCallback);
+        if (!statusWithCQ.isOK()) {
+            return statusWithCQ.getStatus();
+        }
+        std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
 
+        AutoGetCollectionOrViewForRead ctx(txn, nss);
+        // The collection may be NULL. If so, getExecutor() should handle it by returning
+        // an execution tree with an EOFStage.
+        Collection* collection = ctx.getCollection();
         /* Check if this is running on a view */
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            Status viewValidationStatus = qr->validateForView();
+        if (ctx.getView()) {
+            ctx.unlock();
+            auto& qr = cq->getQueryRequest();
+            Status viewValidationStatus = qr.validateForView();
             if (!viewValidationStatus.isOK()) {
                 return viewValidationStatus;
             } else {
-                BSONObj explainCmd = qr->asAggregationCommand();
+                BSONObj explainCmd = qr.asAggregationCommand();
                 Command* c = Command::findCommand("aggregate");
                 std::string errmsg;
                 try {
@@ -168,21 +181,6 @@ public:
                 return Status::OK();
             }
         }
-
-        // Finish the parsing step by using the QueryRequest to create a CanonicalQuery.
-
-        ExtensionsCallbackReal extensionsCallback(txn, &nss);
-        auto statusWithCQ =
-            CanonicalQuery::canonicalize(txn, std::move(qrStatus.getValue()), extensionsCallback);
-        if (!statusWithCQ.isOK()) {
-            return statusWithCQ.getStatus();
-        }
-        std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
-
-        AutoGetCollectionForRead ctx(txn, nss);
-        // The collection may be NULL. If so, getExecutor() should handle it by returning
-        // an execution tree with an EOFStage.
-        Collection* collection = ctx.getCollection();
 
         // We have a parsed query. Time to get the execution plan for it.
         auto statusWithPlanExecutor =
@@ -228,30 +226,6 @@ public:
 
         auto& qr = qrStatus.getValue();
 
-        // Check if this query is being performed on a view.
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            Status viewValidationStatus = qr->validateForView();
-            if (!viewValidationStatus.isOK()) {
-                return appendCommandStatus(result, viewValidationStatus);
-            } else {
-                BSONObj match = qr->asAggregationCommand();
-                Command* c = Command::findCommand("aggregate");
-                try {
-                    c->run(txn, dbname, match, options, errmsg, result);
-                } catch (DBException& e) {
-                    auto errorCode = e.getCode();
-                    if (errorCode == ErrorCodes::InvalidPipelineOperator) {
-                        return appendCommandStatus(
-                            result,
-                            {ErrorCodes::InvalidPipelineOperator,
-                             str::stream() << "Unsupported in view pipeline: " << e.what()});
-                    }
-                    return appendCommandStatus(result, e.toStatus());
-                }
-                return true;
-            }
-        }
-
         // Although it is a command, a find command gets counted as a query.
         globalOpCounters.gotQuery();
 
@@ -289,8 +263,32 @@ public:
         std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
 
         // Acquire locks.
-        AutoGetCollectionForRead ctx(txn, nss);
+        AutoGetCollectionOrViewForRead ctx(txn, nss);
         Collection* collection = ctx.getCollection();
+        // Check if this query is being performed on a view.
+        if (ctx.getView()) {
+            ctx.unlock();
+            auto& qr = cq->getQueryRequest();
+            Status viewValidationStatus = qr.validateForView();
+            if (!viewValidationStatus.isOK()) {
+                return appendCommandStatus(result, viewValidationStatus);
+            }
+            BSONObj match = qr.asAggregationCommand();
+            Command* c = Command::findCommand("aggregate");
+            try {
+                c->run(txn, dbname, match, options, errmsg, result);
+            } catch (DBException& e) {
+                auto errorCode = e.getCode();
+                if (errorCode == ErrorCodes::InvalidPipelineOperator) {
+                    return appendCommandStatus(
+                        result,
+                        {ErrorCodes::InvalidPipelineOperator,
+                         str::stream() << "Unsupported in view pipeline: " << e.what()});
+                }
+                return appendCommandStatus(result, e.toStatus());
+            }
+            return true;
+        }
 
         // Get the execution plan for the query.
         auto statusWithPlanExecutor =

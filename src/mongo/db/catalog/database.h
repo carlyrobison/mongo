@@ -30,11 +30,16 @@
 
 #pragma once
 
+#include <memory>
+#include <string>
+
 #include "mongo/base/string_data.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/catalog/collection_options.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/storage/storage_options.h"
+#include "mongo/db/views/view.h"
+#include "mongo/db/views/view_catalog.h"
 #include "mongo/util/mongoutils/str.h"
 #include "mongo/util/string_map.h"
 
@@ -57,6 +62,7 @@ class OperationContext;
 class Database {
 public:
     typedef StringMap<Collection*> CollectionMap;
+    typedef StringMap<std::shared_ptr<ViewDefinition>> ViewMap;
 
     /**
      * Iterating over a Database yields Collection* pointers.
@@ -146,6 +152,8 @@ public:
 
     Status dropCollection(OperationContext* txn, StringData fullns);
 
+    void dropView(OperationContext* txn, StringData fullns);
+
     Collection* createCollection(OperationContext* txn,
                                  StringData ns,
                                  const CollectionOptions& options = CollectionOptions(),
@@ -158,6 +166,14 @@ public:
 
     Collection* getCollection(const NamespaceString& ns) const {
         return getCollection(ns.ns());
+    }
+
+    ViewDefinition* getView(StringData ns) const {
+        return _views ? _views->lookup(ns) : nullptr;
+    }
+
+    ViewCatalog* getViewCatalog() const {
+        return _views.get();
     }
 
     Collection* getOrCreateCollection(OperationContext* txn, StringData ns);
@@ -216,10 +232,12 @@ private:
 
     const std::string _profileName;  // "alleyinsider.system.profile"
     const std::string _indexesName;  // "alleyinsider.system.indexes"
+    const std::string _viewsName;    // "alleyinsider.system.views"
 
     int _profile;  // 0=off.
 
     CollectionMap _collections;
+    std::unique_ptr<ViewCatalog> _views;
 
     friend class Collection;
     friend class NamespaceDetails;

@@ -108,10 +108,6 @@ public:
 
 
         const NamespaceString nss(parseNs(dbname, cmdObj));
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            errmsg = "cannot use geoNear on a view";
-            return false;
-        }
 
         AutoGetCollectionForRead ctx(txn, nss);
         Collection* collection = ctx.getCollection();

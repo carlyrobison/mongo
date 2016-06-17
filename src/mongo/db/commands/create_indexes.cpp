@@ -101,11 +101,6 @@ public:
         if (!status.isOK())
             return appendCommandStatus(result, status);
 
-        if (ViewCatalog::getInstance()->lookup(ns.ns())) {
-            errmsg = "cannot create indexes on a view";
-            return false;
-        }
-
         if (cmdObj["indexes"].type() != Array) {
             errmsg = "indexes has to be an array";
             result.append("cmdObj", cmdObj);
@@ -192,6 +187,14 @@ public:
         }
 
         Database* db = dbHolder().get(txn, ns.db());
+
+        if (db && db->getView(ns.ns())) {
+            errmsg = "cannot create indexes on a view";
+            return appendCommandStatus(result,
+                                       Status(ErrorCodes::CommandNotSupportedOnView,
+                                              str::stream() << "Cannot create indexes on a view"));
+        }
+
         if (!db) {
             db = dbHolder().openDb(txn, ns.db());
         }

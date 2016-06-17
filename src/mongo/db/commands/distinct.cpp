@@ -182,8 +182,11 @@ public:
 
         auto qr = &parsedDistinct.getValue().getQuery()->getQueryRequest();
 
+        AutoGetCollectionOrViewForRead ctx(txn, ns);
+        Collection* collection = ctx.getCollection();
+
         // Are we counting on a view?
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+        if (ctx.getView()) {
             Status viewValidationStatus = qr->validateForView();
             if (!viewValidationStatus.isOK()) {
                 return viewValidationStatus;
@@ -204,8 +207,6 @@ public:
             return Status::OK();
         }
 
-        AutoGetCollectionForRead ctx(txn, ns);
-        Collection* collection = ctx.getCollection();
 
         auto executor = getExecutorDistinct(
             txn, collection, ns, &parsedDistinct.getValue(), PlanExecutor::YIELD_AUTO);
@@ -234,8 +235,14 @@ public:
         }
 
         auto qr = &parsedDistinct.getValue().getQuery()->getQueryRequest();
+        auto collator = parsedDistinct.getValue().getQuery()->getCollator();
+
+        AutoGetCollectionOrViewForRead ctx(txn, ns);
+        Collection* collection = ctx.getCollection();
+
         // Are we counting on a view?
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+        if (ctx.getView()) {
+            ctx.unlock();
             Status viewValidationStatus = qr->validateForView();
             if (!viewValidationStatus.isOK()) {
                 return appendCommandStatus(result, viewValidationStatus);
@@ -256,12 +263,6 @@ public:
             }
             return true;
         }
-
-        auto collator = parsedDistinct.getValue().getQuery()->getCollator();
-
-        AutoGetCollectionForRead ctx(txn, ns);
-
-        Collection* collection = ctx.getCollection();
 
         auto executor = getExecutorDistinct(
             txn, collection, ns, &parsedDistinct.getValue(), PlanExecutor::YIELD_AUTO);

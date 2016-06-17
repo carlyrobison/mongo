@@ -122,15 +122,10 @@ void _addWorkingSetMember(OperationContext* txn,
     root->pushBack(id);
 }
 
-BSONObj buildViewBson(const ViewDefinition* view) {
-
-    if (!view) {
-        return BSONObj();
-    }
-
+BSONObj buildViewBson(const ViewDefinition& view) {
     BSONObjBuilder b;
-    b.append("name", view->name());
-    BSONObj options = BSON("viewOn" << view->viewOn() << "pipeline" << view->pipeline());
+    b.append("name", view.name());
+    BSONObj options = BSON("viewOn" << view.viewOn() << "pipeline" << view.pipeline());
     b.append("options", options);
     return b.obj();
 }
@@ -251,15 +246,13 @@ public:
                     }
                 }
             }
-        }
-
-        ViewCatalog* viewCatalog = ViewCatalog::getInstance();
-
-        if (viewCatalog) {
-            for (auto&& view : *viewCatalog) {
-                BSONObj viewBson = buildViewBson(view);
-                if (!viewBson.isEmpty()) {
-                    _addWorkingSetMember(txn, viewBson, matcher.get(), ws.get(), root.get());
+            auto viewCatalog = db->getViewCatalog();
+            if (viewCatalog) {
+                for (auto& view : *viewCatalog) {
+                    BSONObj viewBson = buildViewBson(*view);
+                    if (!viewBson.isEmpty()) {
+                        _addWorkingSetMember(txn, viewBson, matcher.get(), ws.get(), root.get());
+                    }
                 }
             }
         }

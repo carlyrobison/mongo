@@ -57,9 +57,10 @@ AutoGetCollection::AutoGetCollection(OperationContext* txn,
     : _autoDb(txn, nss.db(), modeDB),
       _collLock(txn->lockState(), nss.ns(), modeColl),
       _coll(_autoDb.getDb() ? _autoDb.getDb()->getCollection(nss) : nullptr) {
+    Database* db = _autoDb.getDb();
     uassert(ErrorCodes::CommandNotSupportedOnView,
             "Namespace " + nss.ns() + " is a view, not a collection",
-            !ViewCatalog::getInstance()->lookup(nss.ns()));
+            !db || !db->getView(nss.ns()));
 }
 
 AutoGetOrCreateDb::AutoGetOrCreateDb(OperationContext* txn, StringData ns, LockMode mode)
@@ -167,7 +168,8 @@ AutoGetCollectionOrViewForRead::AutoGetCollectionOrViewForRead(OperationContext*
     _autoDb.emplace(txn, nss.db(), MODE_IS);
 
     // The database is now locked in MODE_IS, so first check for the existence of a view.
-    _viewDefinition = ViewCatalog::getInstance()->lookup(nss.ns());
+    Database* db = _autoDb->getDb();
+    _viewDefinition = db ? db->getView(nss.ns()) : nullptr;
     if (_viewDefinition) {
         // We're done. Skip all of the collection-level stuff.
         return;

@@ -35,6 +35,7 @@
 #include "mongo/db/catalog/database.h"
 
 #include <algorithm>
+#include <memory>
 #include <boost/filesystem/operations.hpp>
 
 #include "mongo/db/audit.h"
@@ -202,7 +203,8 @@ Database::Database(OperationContext* txn, StringData name, DatabaseCatalogEntry*
     : _name(name.toString()),
       _dbEntry(dbEntry),
       _profileName(_name + ".system.profile"),
-      _indexesName(_name + ".system.indexes") {
+      _indexesName(_name + ".system.indexes"),
+      _viewsName(_name + ".system.views") {
     Status status = validateDBName(_name);
     if (!status.isOK()) {
         warning() << "tried to open invalid db: " << _name << endl;
@@ -347,6 +349,10 @@ void Database::getStats(OperationContext* opCtx, BSONObjBuilder* output, double 
     _dbEntry->appendExtraStats(opCtx, output, scale);
 }
 
+void Database::dropView(OperationContext* txn, StringData fullns) {
+    _views->removeFromCatalog(fullns);
+}
+
 Status Database::dropCollection(OperationContext* txn, StringData fullns) {
     invariant(txn->lockState()->isDbLockedForMode(name(), MODE_X));
 
@@ -442,7 +448,6 @@ Collection* Database::getCollection(StringData ns) const {
     return NULL;
 }
 
-
 Status Database::renameCollection(OperationContext* txn,
                                   StringData fromNS,
                                   StringData toNS,
@@ -518,9 +523,10 @@ Collection* Database::createCollection(OperationContext* txn,
         uassert(ErrorCodes::InvalidNamespace,
                 "invalid namespace name for a view: " + nss.toString(),
                 !nss.isOplog());
-        // ns is fully-qualified already, but viewNs is not. Append the database name.
-        uassertStatusOK(ViewCatalog::getInstance()->createView(
-            txn, nss, options.viewNamespace, options.pipeline));
+        if (!_views) {
+            _views = stdx::make_unique<ViewCatalog>();
+        }
+        uassertStatusOK(_views->createView(txn, nss, options.viewNamespace, options.pipeline));
 
         LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
                << options.viewNamespace << " with pipeline " << options.pipeline;
@@ -635,9 +641,7 @@ Status userCreateNS(OperationContext* txn,
         return Status(ErrorCodes::NamespaceExists,
                       "a collection '" + ns.toString() + "' already exists");
 
-    ViewDefinition* view = ViewCatalog::getInstance()->lookup(ns);
-
-    if (view)
+    if (db->getView(ns))
         return Status(ErrorCodes::NamespaceExists, "a view '" + ns.toString() + "' already exists");
 
     CollectionOptions collectionOptions;

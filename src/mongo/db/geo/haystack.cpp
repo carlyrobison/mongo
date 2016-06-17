@@ -95,10 +95,6 @@ public:
              string& errmsg,
              BSONObjBuilder& result) {
         const NamespaceString nss = parseNsCollectionRequired(dbname, cmdObj);
-        if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            errmsg = "cannot use geoSearch on a view";
-            return false;
-        }
 
         AutoGetCollectionForRead ctx(txn, nss.ns());
 

@@ -34,6 +34,7 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "mongo/base/status.h"
 #include "mongo/base/string_data.h"
@@ -46,13 +47,11 @@
 
 namespace mongo {
 
-class ViewDefinition;
-
 // In-memory data structure that holds view definitions
 class ViewCatalog {
 public:
-    typedef StringMap<ViewDefinition*> ViewMap;
-    // typedef ViewMap = std::map<std::string, std::unique_ptr<ViewDefinition>>;
+    // TODO(SERVER-23700): Make this a unique_ptr once StringMap supports move-only types.
+    typedef StringMap<std::shared_ptr<ViewDefinition>> ViewMap;
 
     /**
      * Iterating over a ViewCatalog yields ViewDefinition* pointers.
@@ -61,7 +60,7 @@ public:
     class iterator {
     public:
         using iterator_category = std::forward_iterator_tag;
-        using value_type = ViewDefinition*;
+        using value_type = std::shared_ptr<ViewDefinition>;
         using pointer = const value_type*;
         using reference = const value_type&;
         using difference_type = ptrdiff_t;
@@ -101,11 +100,6 @@ public:
     };
 
     static const std::uint32_t kMaxViewDepth;
-
-    /**
-     * Return a pointer to the view catalog. Note that the caller does not own this pointer.
-     */
-    static ViewCatalog* getInstance();
 
     iterator begin() const {
         return iterator(_viewMap.begin());

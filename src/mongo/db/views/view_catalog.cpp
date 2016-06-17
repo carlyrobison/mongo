@@ -55,11 +55,6 @@ ViewCatalog* viewCatalogSingleton = new ViewCatalog();
 
 const std::uint32_t ViewCatalog::kMaxViewDepth = 20;
 
-ViewCatalog* ViewCatalog::getInstance() {
-    invariant(viewCatalogSingleton);
-    return viewCatalogSingleton;
-}
-
 Status ViewCatalog::createView(OperationContext* txn,
                                const NamespaceString& viewName,
                                const std::string& viewOn,
@@ -70,14 +65,15 @@ Status ViewCatalog::createView(OperationContext* txn,
         return Status(ErrorCodes::NamespaceExists, "Namespace already exists");
     }
 
-    _viewMap[viewName.ns()] = new ViewDefinition(viewName.db(), viewName.coll(), viewOn, pipeline);
+    _viewMap[viewName.ns()] =
+        std::make_shared<ViewDefinition>(viewName.db(), viewName.coll(), viewOn, pipeline);
     return Status::OK();
 }
 
 ViewDefinition* ViewCatalog::lookup(StringData ns) {
     ViewMap::const_iterator it = _viewMap.find(ns);
     if (it != _viewMap.end() && it->second) {
-        return it->second;
+        return it->second.get();
     }
     return nullptr;
 }

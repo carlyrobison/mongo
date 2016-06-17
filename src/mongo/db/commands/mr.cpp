@@ -1356,11 +1356,6 @@ public:
 
         LOG(1) << "mr ns: " << config.ns << endl;
 
-        if (ViewCatalog::getInstance()->lookup(config.ns)) {
-            errmsg = "cannot run mapReduce on a view";
-            return false;
-        }
-
         uassert(16149, "cannot run map reduce without the js engine", globalScriptEngine);
 
         shared_ptr<CollectionMetadata> collMetadata;

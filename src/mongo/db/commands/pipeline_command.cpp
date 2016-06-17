@@ -220,19 +220,6 @@ public:
 
         const NamespaceString nss(ns);
 
-        // Check if this query is being performed on a view.
-        if (ViewCatalog::getInstance()->lookup(ns)) {
-            // If the collection can't be found, attempt to resolve the namespace as a view.
-            auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, ns);
-            std::string rootNs = std::get<0>(newAggregation);
-            std::vector<BSONObj> viewPipeline = std::get<1>(newAggregation);
-            BSONObj viewCmd = ViewDefinition::getAggregateCommand(rootNs, cmdObj, viewPipeline);
-
-            LOG(2) << "VIEWS: Final pipeline: " << viewCmd.jsonString();
-
-            return this->run(txn, db, viewCmd, options, errmsg, result);
-        }
-
         intrusive_ptr<ExpressionContext> pCtx = new ExpressionContext(txn, nss);
         pCtx->tempDir = storageGlobalParams.dbpath + "/_tmp";
 
@@ -257,14 +244,6 @@ public:
         unique_ptr<PlanExecutor> exec;
         auto curOp = CurOp::get(txn);
         {
-            // If the collection can't be found, attempt to resolve the namespace as a view.
-            // auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, nss.ns(),
-            // pPipeline);
-
-            // This is our final pipeline: a modified one for a view, or the original if it's not a
-            // view.
-            // pPipeline = std::get<1>(newAggregation);
-
             // Acquire locks.
             // This will throw if the sharding version for this connection is out of date. The
             // lock must be held continuously from now until we have we created both the output
@@ -272,8 +251,20 @@ public:
             // sharding version that we synchronize on here. This is also why we always need to
             // create a ClientCursor even when we aren't outputting to a cursor. See the comment
             // on ShardFilterStage for more details.
-            AutoGetCollectionForRead ctx(txn, ns);
+            AutoGetCollectionOrViewForRead ctx(txn, ns);
             Collection* collection = ctx.getCollection();
+
+            // If this is a view, resolve it.
+            if (ctx.getView()) {
+                auto newAggregation = ctx.getDb()->getViewCatalog()->resolveView(txn, ns);
+                std::string rootNs = std::get<0>(newAggregation);
+                std::vector<BSONObj> viewPipeline = std::get<1>(newAggregation);
+                BSONObj viewCmd = ViewDefinition::getAggregateCommand(rootNs, cmdObj, viewPipeline);
+
+                LOG(2) << "VIEWS: Final pipeline: " << viewCmd.jsonString();
+                ctx.unlock();
+                return this->run(txn, db, viewCmd, options, errmsg, result);
+            }
 
             // This does mongod-specific stuff like creating the input PlanExecutor and adding
             // it to the front of the pipeline if needed.

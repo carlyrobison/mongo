@@ -53,6 +53,13 @@ public:
                    StringData viewOn,
                    const BSONObj& pipeline);
 
+    void operator=(const ViewDefinition& other) {
+        _dbName = other._dbName;
+        _viewName = other._viewName;
+        _backingViewName = other._backingViewName;
+        _pipeline = other._pipeline;
+    }
+
     StringData name() const {
         return StringData(_viewName);
     }

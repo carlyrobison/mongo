@@ -374,6 +374,11 @@ public:
                 }
 
                 AutoGetOrCreateDb autoDb(txn, dbName, MODE_IX);
+                if (autoDb.getDb()->getView(nsString.ns())) {
+                    return appendCommandStatus(result,
+                                               {ErrorCodes::CommandNotSupportedOnView,
+                                                   "findAndModify not supported on views"});
+                }
                 Lock::CollectionLock collLock(txn->lockState(), nsString.ns(), MODE_IX);
 
                 // Attach the namespace and database profiling level to the current op.
@@ -442,6 +447,12 @@ public:
                 }
 
                 AutoGetOrCreateDb autoDb(txn, dbName, MODE_IX);
+                if (autoDb.getDb()->getView(nsString.ns())) {
+                    return appendCommandStatus(result,
+                                               {ErrorCodes::CommandNotSupportedOnView,
+                                                   "findAndModify not supported on views"});
+                }
+
                 Lock::CollectionLock collLock(txn->lockState(), nsString.ns(), MODE_IX);
 
                 // Attach the namespace and database profiling level to the current op.
@@ -529,15 +540,16 @@ public:
         MONGO_WRITE_CONFLICT_RETRY_LOOP_END(txn, "findAndModify", nsString.ns());
 
         if (repl::ReplClientInfo::forClient(client).getLastOp() != lastOpAtOperationStart) {
-            // If this operation has already generated a new lastOp, don't bother setting it here.
-            // No-op updates will not generate a new lastOp, so we still need the guard to fire in
+            // If this operation has already generated a new lastOp, don't bother setting it
+            // here.
+            // No-op updates will not generate a new lastOp, so we still need the guard to fire
+            // in
             // that case.
             lastOpSetterGuard.Dismiss();
         }
 
         return true;
     }
-
 } cmdFindAndModify;
 
 }  // namespace mongo

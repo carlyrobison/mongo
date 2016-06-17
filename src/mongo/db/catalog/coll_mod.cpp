@@ -50,14 +50,14 @@ Status collMod(OperationContext* txn,
     ScopedTransaction transaction(txn, MODE_IX);
     AutoGetDb autoDb(txn, dbName, MODE_X);
     Database* const db = autoDb.getDb();
-    Collection* coll = db ? db->getCollection(nss) : NULL;
+    Collection* coll = db ? db->getCollection(nss) : nullptr;
+    // May also modify a view instead of a collection.
+    ViewDefinition* view = db ? db->getView(nss.ns()) : nullptr;
 
     // This can kill all cursors so don't allow running it while a background operation is in
     // progress.
     BackgroundOperation::assertNoBgOpInProgForNs(nss);
 
-    // May also modify a view instead of a collection.
-    ViewDefinition* view = ViewCatalog::getInstance()->lookup(nss.ns());
 
     // If db/collection/view does not exist, short circuit and return.
     if (!db || (!coll && !view)) {
