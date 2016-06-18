@@ -52,61 +52,14 @@ class ViewCatalog {
 public:
     // TODO(SERVER-23700): Make this a unique_ptr once StringMap supports move-only types.
     typedef StringMap<std::shared_ptr<ViewDefinition>> ViewMap;
-
-    /**
-     * Iterating over a ViewCatalog yields ViewDefinition* pointers.
-     * Enable range based for loops
-     */
-    class iterator {
-    public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = std::shared_ptr<ViewDefinition>;
-        using pointer = const value_type*;
-        using reference = const value_type&;
-        using difference_type = ptrdiff_t;
-
-        iterator() = default;
-        iterator(ViewMap::const_iterator it) : _it(it) {}
-
-        reference operator*() const {
-            return _it->second;
-        }
-
-        pointer operator->() const {
-            return &_it->second;
-        }
-
-        bool operator==(const iterator& other) {
-            return _it == other._it;
-        }
-
-        bool operator!=(const iterator& other) {
-            return _it != other._it;
-        }
-
-        iterator& operator++() {
-            ++_it;
-            return *this;
-        }
-
-        iterator operator++(int) {
-            auto oldPosition = *this;
-            ++_it;
-            return oldPosition;
-        }
-
-    private:
-        ViewMap::const_iterator _it;
-    };
-
     static const std::uint32_t kMaxViewDepth;
 
-    iterator begin() const {
-        return iterator(_viewMap.begin());
+    ViewMap::const_iterator begin() const {
+        return _viewMap.begin();
     }
 
-    iterator end() const {
-        return iterator(_viewMap.end());
+    ViewMap::const_iterator end() const {
+        return _viewMap.end();
     }
 
     /**
@@ -138,9 +91,6 @@ public:
      *
      * @returns A pair containing the fully-qualified namespace and pipeline for an aggregation.
      */
-    // std::tuple<std::string, boost::intrusive_ptr<Pipeline>> resolveView(
-    //     OperationContext* txn, StringData ns, boost::intrusive_ptr<Pipeline> pipeline);
-
     std::tuple<std::string, std::vector<BSONObj>> resolveView(OperationContext* txn, StringData ns);
 
 private:

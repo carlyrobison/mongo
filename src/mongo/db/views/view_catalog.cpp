@@ -49,10 +49,6 @@
 
 namespace mongo {
 
-namespace {
-ViewCatalog* viewCatalogSingleton = new ViewCatalog();
-}  // namespace
-
 const std::uint32_t ViewCatalog::kMaxViewDepth = 20;
 
 Status ViewCatalog::createView(OperationContext* txn,
