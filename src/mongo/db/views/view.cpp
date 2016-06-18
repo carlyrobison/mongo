@@ -58,12 +58,10 @@ ViewDefinition::ViewDefinition(StringData dbName,
 }
 
 void ViewDefinition::changeBackingNs(std::string newNs) {
-    stdx::lock_guard<stdx::mutex> lock(_mutex);
     _backingViewName = newNs;
 }
 
 void ViewDefinition::changePipeline(const BSONObj& pipeline) {
-    stdx::lock_guard<stdx::mutex> lock(_mutex);
     _pipeline.clear();
     for (BSONElement e : pipeline) {
         BSONObj value = e.Obj();

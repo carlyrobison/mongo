@@ -42,10 +42,7 @@
 
 namespace mongo {
 
-class Pipeline;
-class BSONObj;
-
-// Represents a "view"; that is, a visible subset of a collection or another view.
+// Represents a "view";a virtual collection defiend by query on a collection or another view.
 class ViewDefinition {
 public:
     ViewDefinition(StringData dbName,
@@ -107,7 +104,6 @@ public:
     }
 
 private:
-    stdx::mutex _mutex;
     std::string _dbName;
     std::string _viewName;  // The namespace of the view.
     std::string
