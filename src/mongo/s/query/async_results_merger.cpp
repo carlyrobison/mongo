@@ -41,6 +41,7 @@
 #include "mongo/rpc/metadata/server_selection_metadata.h"
 #include "mongo/s/client/shard_registry.h"
 #include "mongo/s/grid.h"
+#include "mongo/s/query/view_util.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
 #include "mongo/util/scopeguard.h"
@@ -375,6 +376,20 @@ StatusWith<CursorResponse> AsyncResultsMerger::parseCursorResponse(const BSONObj
     return std::move(cursorResponse);
 }
 
+void AsyncResultsMerger::preserveViewDefinitionIfAny(OperationContext* txn,
+                                                     const BSONObj& responseObj) {
+    if (!txn) {
+        return;
+    }
+
+    if (responseObj.hasField("code")) {
+        auto code = responseObj.getField("code").Int();
+        if (code == ErrorCodes::ViewMustRunOnMongos && responseObj.hasField("resolvedView")) {
+            ClusterViewUtil::setResolvedView(txn, responseObj.getObjectField("resolvedView"));
+        }
+    }
+}
+
 void AsyncResultsMerger::handleBatchResponse(
     const executor::TaskExecutor::RemoteCommandCallbackArgs& cbData, size_t remoteIndex) {
     stdx::lock_guard<stdx::mutex> lk(_mutex);
@@ -422,6 +437,10 @@ void AsyncResultsMerger::handleBatchResponse(
 
     // Early return from this point on signal anyone waiting on an event, if ready() is true.
     ScopeGuard signaller = MakeGuard(&AsyncResultsMerger::signalCurrentEventIfReady_inlock, this);
+
+    if (cbData.response.isOK()) {
+        preserveViewDefinitionIfAny(_params.opCtx, cbData.response.getValue().data);
+    }
 
     StatusWith<CursorResponse> cursorResponseStatus(
         cbData.response.isOK() ? parseCursorResponse(cbData.response.getValue().data, remote)

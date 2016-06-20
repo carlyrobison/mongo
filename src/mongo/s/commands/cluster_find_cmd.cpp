@@ -36,8 +36,10 @@
 #include "mongo/db/matcher/extensions_callback_noop.h"
 #include "mongo/db/query/cursor_response.h"
 #include "mongo/db/stats/counters.h"
+#include "mongo/db/views/view_transform.h"
 #include "mongo/s/commands/strategy.h"
 #include "mongo/s/query/cluster_find.h"
+#include "mongo/s/query/view_util.h"
 
 namespace mongo {
 namespace {
@@ -128,6 +130,47 @@ public:
              int options,
              std::string& errmsg,
              BSONObjBuilder& result) final {
+
+        auto ok = executeFind(txn, dbname, cmdObj, options, errmsg, result);
+
+        if (!ok) {
+            BSONObj tmp = result.asTempObj();
+            if (tmp.hasField("code")) {  // TODO - can we assume 'code' exists?
+                auto codeElement = tmp.getField("code");
+                auto code = codeElement.Int();
+
+                if (code == ErrorCodes::ViewMustRunOnMongos) {
+                    auto viewDef = ClusterViewUtil::getResolvedView(txn);
+                    invariant(!viewDef.isEmpty());
+
+                    BSONObj match = ViewTransform::findToViewAggregation(
+                        viewDef["ns"].str(), viewDef["pipeline"].Array(), cmdObj, false);
+                    if (!match.isEmpty()) {
+                        result.resetToEmpty();
+                        // TODO: Do we need to bypass auth? Looks like we are past auth?
+                        Command* c = Command::findCommand("aggregate");
+                        bool retval = c->run(txn, dbname, match, options, errmsg, result);
+                        return retval;
+                    }
+
+                    return appendCommandStatus(
+                        result,
+                        {ErrorCodes::OptionNotSupportedOnView,
+                         str::stream() << "One or more option not supported on views."});
+                }
+            }
+        }
+
+        return ok;
+    }
+
+private:
+    bool executeFind(OperationContext* txn,
+                     const std::string& dbname,
+                     BSONObj& cmdObj,
+                     int options,
+                     std::string& errmsg,
+                     BSONObjBuilder& result) {
         // We count find command as a query op.
         globalOpCounters.gotQuery();
 

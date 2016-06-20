@@ -52,6 +52,7 @@ class ViewCatalog {
 public:
     // TODO(SERVER-23700): Make this a unique_ptr once StringMap supports move-only types.
     typedef StringMap<std::shared_ptr<ViewDefinition>> ViewMap;
+
     static const std::uint32_t kMaxViewDepth;
 
     ViewMap::const_iterator begin() const {
