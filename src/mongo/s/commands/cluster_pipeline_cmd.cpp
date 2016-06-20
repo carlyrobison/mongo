@@ -455,15 +455,13 @@ BSONObj PipelineCommand::aggRunCommand(
 
     BSONObj result = cursor->nextSafe().getOwned();
 
-    std::cout << "JJJ result: " << result << std::endl;
-
     auto status = getStatusFromCommandResult(result);
 
     if (ErrorCodes::SendStaleConfig == status) {
         throw RecvStaleConfigException("command failed because of stale config", result);
     }
 
-    // TODO: We can probably skip hasField check. Should add a new error as well.
+    // TODO: We can probably skip hasField check.
     if (ErrorCodes::ViewMustRunOnMongos == status && result.hasField("resolvedView")) {
         ClusterViewUtil::setResolvedView(txn, result.getObjectField("resolvedView"));
     }

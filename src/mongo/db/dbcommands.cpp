@@ -1312,7 +1312,14 @@ void Command::execCommand(OperationContext* txn,
             repl::ReplicationCoordinator::get(txn->getClient()->getServiceContext());
         const bool canAcceptWrites = replCoord->canAcceptWritesForDatabase(dbname);
         const auto commandNS = NamespaceString(command->parseNs(dbname, request.getCommandArgs()));
-        const bool isView = ViewCatalog::getInstance()->lookup(commandNS.ns());
+        const bool isView;
+        { 
+            // TODO: We shouldn't be grabbing this lock just to confirm this is a view. Need a
+            // better solution.
+            AutoGetCollectionOrViewForRead ctx(txn, ns);
+            Collection* collection = ctx.getCollection();
+            isView = ctx.getView();
+        }
         // Depends on SERVER-24126 for proper behavior. Will need a rebase to pick up.
         const auto isShardAware = serverGlobalParams.clusterRole == ClusterRole::ShardServer;
 

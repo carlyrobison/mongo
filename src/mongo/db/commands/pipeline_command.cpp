@@ -58,7 +58,6 @@
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/db/views/view.h"
 #include "mongo/db/views/view_catalog.h"
-#include "mongo/db/views/view_transform.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/log.h"
 

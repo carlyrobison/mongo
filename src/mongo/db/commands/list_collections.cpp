@@ -246,7 +246,6 @@ public:
                     }
                 }
             }
-
             auto viewCatalog = db->getViewCatalog();
             if (viewCatalog) {
                 for (auto& view : *viewCatalog) {
