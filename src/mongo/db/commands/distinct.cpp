@@ -291,9 +291,10 @@ public:
                 bool retval = c->run(txn, dbname, agg, options, errmsg, result);
                 return retval;
             } else {
-                return appendCommandStatus(result,
-                                       {ErrorCodes::OptionNotSupportedOnView,
-                                        str::stream() << "One or more option not supported on views."});
+                return appendCommandStatus(
+                    result,
+                    {ErrorCodes::OptionNotSupportedOnView,
+                     str::stream() << "One or more option not supported on views."});
             }
         }
 

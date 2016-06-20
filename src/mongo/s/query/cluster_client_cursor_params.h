@@ -95,16 +95,18 @@ struct ClusterClientCursorParams {
      * know yet the remote cursor id).
      */
     ClusterClientCursorParams(NamespaceString nss, ReadPreferenceSetting readPref)
-        : nsString(std::move(nss)), readPreference(std::move(readPref)) {}
+        : nsString(std::move(nss)), opCtx(nullptr), readPreference(std::move(readPref)) {}
 
     /**
      * Constructor used for cases, where the remote cursor ids are already known and no resolution
      * or retargeting needs to happen.
      */
-    ClusterClientCursorParams(NamespaceString nss) : nsString(std::move(nss)) {}
+    ClusterClientCursorParams(NamespaceString nss) : nsString(std::move(nss)), opCtx(nullptr) {}
 
     // Namespace against which to query.
     NamespaceString nsString;
+
+    OperationContext* opCtx;
 
     // Per-remote node data.
     std::vector<Remote> remotes;

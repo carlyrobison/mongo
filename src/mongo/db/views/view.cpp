@@ -45,7 +45,10 @@
 
 namespace mongo {
 
-ViewDefinition::ViewDefinition(std::string dbName, std::string viewName, std::string backingViewName, BSONObj& pipeline) {
+ViewDefinition::ViewDefinition(std::string dbName,
+                               std::string viewName,
+                               std::string backingViewName,
+                               BSONObj& pipeline) {
     _dbName = dbName;
     _viewName = viewName;
     _backingViewName = backingViewName;

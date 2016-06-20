@@ -251,9 +251,7 @@ var DB;
     DB.prototype.createView = function(name, opt) {
         var options = opt || {};
 
-        var cmd = {
-            create: name
-        };
+        var cmd = {create: name};
 
         if (options.view == undefined) {
             throw Error("Must specify a backing view or collection");

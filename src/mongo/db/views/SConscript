@@ -6,7 +6,8 @@ env.Library(
     target='view',
     source=[
         'view.cpp',
-        'view_catalog.cpp'
+        'view_catalog.cpp',
+        'view_transform.cpp',
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',

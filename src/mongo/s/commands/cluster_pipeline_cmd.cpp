@@ -42,6 +42,7 @@
 #include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/expression_context.h"
 #include "mongo/db/pipeline/pipeline.h"
+#include "mongo/db/views/view_transform.h"
 #include "mongo/executor/task_executor_pool.h"
 #include "mongo/platform/random.h"
 #include "mongo/rpc/get_status_from_command_result.h"
@@ -54,6 +55,7 @@
 #include "mongo/s/config.h"
 #include "mongo/s/grid.h"
 #include "mongo/s/query/store_possible_cursor.h"
+#include "mongo/s/query/view_util.h"
 #include "mongo/s/stale_exception.h"
 #include "mongo/util/log.h"
 
@@ -104,6 +106,52 @@ public:
                      int options,
                      std::string& errmsg,
                      BSONObjBuilder& result) {
+        auto ok = executePipelineCommand(txn, dbname, cmdObj, options, errmsg, result);
+
+        if (!ok) {
+            BSONObj tmp = result.asTempObj();
+            if (tmp.hasField("code")) {
+                auto code = tmp.getField("code").Int();
+
+                if (code == ErrorCodes::ViewMustRunOnMongos) {
+                    auto viewDef = ClusterViewUtil::getResolvedView(txn);
+                    invariant(!viewDef.isEmpty());
+
+                    std::vector<BSONObj> pipeline;
+                    for (auto&& item : viewDef["pipeline"].Array()) {
+                        // TODO: getOwned here prevents invalid memory access. Fix with viewDef
+                        // split.
+                        pipeline.push_back(item.Obj().getOwned());
+                    }
+
+                    BSONObj match = ViewTransform::pipelineToViewAggregation(
+                        viewDef["ns"].str(), pipeline, cmdObj);
+
+                    if (!match.isEmpty()) {
+                        result.resetToEmpty();
+                        Command* c = Command::findCommand("aggregate");
+                        bool retval = c->run(txn, dbname, match, options, errmsg, result);
+                        return retval;
+                    }
+
+                    return appendCommandStatus(
+                        result,
+                        {ErrorCodes::OptionNotSupportedOnView,
+                         str::stream() << "One or more option not supported on views."});
+                }
+            }
+        }
+
+        return ok;
+    }
+
+private:
+    bool executePipelineCommand(OperationContext* txn,
+                                const std::string& dbname,
+                                BSONObj& cmdObj,
+                                int options,
+                                std::string& errmsg,
+                                BSONObjBuilder& result) {
         const string fullns = parseNs(dbname, cmdObj);
 
         auto status = grid.catalogCache()->getDatabase(txn, dbname);
@@ -248,7 +296,7 @@ public:
         const auto mergingShard = grid.shardRegistry()->getShard(txn, mergingShardId);
         ShardConnection conn(mergingShard->getConnString(), outputNsOrEmpty);
         BSONObj mergedResults =
-            aggRunCommand(conn.get(), dbname, mergeCmd.freeze().toBson(), options);
+            aggRunCommand(txn, conn.get(), dbname, mergeCmd.freeze().toBson(), options);
         conn.done();
 
         if (auto wcErrorElem = mergedResults["writeConcernError"]) {
@@ -262,7 +310,6 @@ public:
         return mergedResults["ok"].trueValue();
     }
 
-private:
     std::vector<DocumentSourceMergeCursors::CursorDescriptor> parseCursors(
         const vector<Strategy::CommandResult>& shardResults);
 
@@ -274,7 +321,8 @@ private:
     // could be different from conn->getServerAddress() for connections that map to
     // multiple servers such as for replica sets. These also take care of registering
     // returned cursors.
-    BSONObj aggRunCommand(DBClientBase* conn, const string& db, BSONObj cmd, int queryOptions);
+    BSONObj aggRunCommand(
+        OperationContext* txn, DBClientBase* conn, const string& db, BSONObj cmd, int queryOptions);
 
     bool aggPassthrough(OperationContext* txn,
                         shared_ptr<DBConfig> conf,
@@ -386,10 +434,8 @@ void PipelineCommand::killAllCursors(const vector<Strategy::CommandResult>& shar
     }
 }
 
-BSONObj PipelineCommand::aggRunCommand(DBClientBase* conn,
-                                       const string& db,
-                                       BSONObj cmd,
-                                       int queryOptions) {
+BSONObj PipelineCommand::aggRunCommand(
+    OperationContext* txn, DBClientBase* conn, const string& db, BSONObj cmd, int queryOptions) {
     // Temporary hack. See comment on declaration for details.
 
     massert(17016,
@@ -409,8 +455,17 @@ BSONObj PipelineCommand::aggRunCommand(DBClientBase* conn,
 
     BSONObj result = cursor->nextSafe().getOwned();
 
-    if (ErrorCodes::SendStaleConfig == getStatusFromCommandResult(result)) {
+    std::cout << "JJJ result: " << result << std::endl;
+
+    auto status = getStatusFromCommandResult(result);
+
+    if (ErrorCodes::SendStaleConfig == status) {
         throw RecvStaleConfigException("command failed because of stale config", result);
+    }
+
+    // TODO: We can probably skip hasField check. Should add a new error as well.
+    if (ErrorCodes::ViewMustRunOnMongos == status && result.hasField("resolvedView")) {
+        ClusterViewUtil::setResolvedView(txn, result.getObjectField("resolvedView"));
     }
 
     auto executorPool = grid.getExecutorPool();
@@ -429,7 +484,7 @@ bool PipelineCommand::aggPassthrough(OperationContext* txn,
     // Temporary hack. See comment on declaration for details.
     const auto shard = grid.shardRegistry()->getShard(txn, conf->getPrimaryId());
     ShardConnection conn(shard->getConnString(), "");
-    BSONObj result = aggRunCommand(conn.get(), conf->name(), cmd, queryOptions);
+    BSONObj result = aggRunCommand(txn, conn.get(), conf->name(), cmd, queryOptions);
     conn.done();
 
     // First append the properly constructed writeConcernError. It will then be skipped

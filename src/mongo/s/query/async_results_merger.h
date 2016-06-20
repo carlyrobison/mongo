@@ -45,6 +45,7 @@
 namespace mongo {
 
 class CursorResponse;
+class OperationContext;
 
 /**
  * AsyncResultsMerger is used to generate results from cursor-generating commands on one or more
@@ -274,6 +275,14 @@ private:
      */
     static StatusWith<CursorResponse> parseCursorResponse(const BSONObj& responseObj,
                                                           const RemoteCursorData& remote);
+
+    /**
+     * In the case a read is performed against a view, the shard primary may return an error
+     * indicating that the underlying collection may be sharded. When this occurs the return
+     * message will include a decomposed view and collection namespace which we need to store. This
+     * allows for a second attempt at the read directly against the underlying collection.
+     */
+    static void preserveViewDefinitionIfAny(OperationContext* txn, const BSONObj& responseObj);
 
     /**
      * Helper to schedule a command asking the remote node for another batch of results.

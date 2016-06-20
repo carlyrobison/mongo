@@ -220,13 +220,14 @@ public:
         if (ViewCatalog::getInstance()->lookup(nss.ns())) {
             BSONObj agg = convertToAggregate(cmdObj, false);
             if (!agg.isEmpty()) {
-                Command *c = Command::findCommand("aggregate");
+                Command* c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, agg, options, errmsg, result);
                 return retval;
             } else {
-                return appendCommandStatus(result,
-                                       {ErrorCodes::OptionNotSupportedOnView,
-                                        str::stream() << "One or more option not supported on views."});
+                return appendCommandStatus(
+                    result,
+                    {ErrorCodes::OptionNotSupportedOnView,
+                     str::stream() << "One or more option not supported on views."});
             }
         }
 

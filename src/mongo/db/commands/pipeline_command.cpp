@@ -30,8 +30,8 @@
 
 #include "mongo/platform/basic.h"
 
-#include <vector>
 #include <cctype>
+#include <vector>
 
 #include "mongo/db/auth/action_set.h"
 #include "mongo/db/auth/action_type.h"
@@ -58,6 +58,7 @@
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/db/views/view.h"
 #include "mongo/db/views/view_catalog.h"
+#include "mongo/db/views/view_transform.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/log.h"
 
@@ -226,7 +227,8 @@ public:
             auto newAggregation = ViewCatalog::getInstance()->resolveView(txn, ns);
             std::string rootNs = std::get<0>(newAggregation);
             std::vector<BSONObj> viewPipeline = std::get<1>(newAggregation);
-            BSONObj viewCmd = ViewDefinition::getAggregateCommand(rootNs, cmdObj, viewPipeline);
+            BSONObj viewCmd =
+                ViewTransform::pipelineToViewAggregation(rootNs, viewPipeline, cmdObj);
 
             // log() << "Final cmd: " << viewCmd.jsonString();
             // log() << "Final ns: " << rootNs;

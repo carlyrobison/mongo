@@ -85,7 +85,7 @@ public:
         }
 
         iterator& operator++() {
-        ++_it;
+            ++_it;
             return *this;
         }
 

@@ -86,13 +86,12 @@
 #include "mongo/db/repl/repl_client_info.h"
 #include "mongo/db/repl/repl_settings.h"
 #include "mongo/db/repl/replication_coordinator_global.h"
+#include "mongo/db/s/collection_metadata.h"
 #include "mongo/db/s/operation_sharding_state.h"
 #include "mongo/db/s/sharding_state.h"
 #include "mongo/db/server_parameters.h"
-#include "mongo/db/write_concern.h"
 #include "mongo/db/views/view_catalog.h"
-#include "mongo/rpc/request_interface.h"
-#include "mongo/rpc/reply_builder_interface.h"
+#include "mongo/db/write_concern.h"
 #include "mongo/rpc/metadata.h"
 #include "mongo/rpc/metadata/config_server_metadata.h"
 #include "mongo/rpc/metadata/repl_set_metadata.h"
@@ -100,6 +99,8 @@
 #include "mongo/rpc/metadata/sharding_metadata.h"
 #include "mongo/rpc/protocol.h"
 #include "mongo/rpc/reply_builder_interface.h"
+#include "mongo/rpc/reply_builder_interface.h"
+#include "mongo/rpc/request_interface.h"
 #include "mongo/rpc/request_interface.h"
 #include "mongo/s/chunk_version.h"
 #include "mongo/s/client/shard_registry.h"
@@ -1309,7 +1310,44 @@ void Command::execCommand(OperationContext* txn,
 
         repl::ReplicationCoordinator* replCoord =
             repl::ReplicationCoordinator::get(txn->getClient()->getServiceContext());
-        const bool iAmPrimary = replCoord->canAcceptWritesForDatabase(dbname);
+        const bool canAcceptWrites = replCoord->canAcceptWritesForDatabase(dbname);
+        const auto commandNS = NamespaceString(command->parseNs(dbname, request.getCommandArgs()));
+        const bool isView = ViewCatalog::getInstance()->lookup(commandNS.ns());
+        // Depends on SERVER-24126 for proper behavior. Will need a rebase to pick up.
+        const auto isShardAware = serverGlobalParams.clusterRole == ClusterRole::ShardServer;
+
+        // Views in a cluster may be built on a sharded collection. Secondaries don't understand
+        if (isView && isShardAware) {
+            // TODO: Do we need to support DBDirectClient here?
+            invariant(!txn->getClient()->isInDirectClient());
+
+            // TODO: This call may be expensive if we don't need the definition. Add quick lookup
+            // for underlying collection.
+            // TODO: We are not under lock atm so no guarantee this view still exists.
+            auto view = ViewCatalog::getInstance()->resolveView(txn, commandNS.ns());
+
+            const auto& sourceNs = std::get<0>(view);
+            const auto sourceColIsSharded =
+                (ShardingState::get(txn)->getCollectionMetadata(sourceNs)->getNumChunks() > 0);
+
+            if (!canAcceptWrites || sourceColIsSharded) {
+                BSONObjBuilder inPlaceReplyBob(
+                    replyBuilder->getInPlaceReplyBuilder(command->reserveBytesForReply()));
+
+                BSONObjBuilder viewBob;
+                viewBob.append("ns", sourceNs);
+                viewBob.append("pipeline", std::get<1>(view));
+
+                inPlaceReplyBob.append("resolvedView", viewBob.obj());
+                appendCommandStatus(
+                    inPlaceReplyBob,
+                    {ErrorCodes::ViewMustRunOnMongos,
+                     str::stream() << "Command on view must be executed by mongos"});
+                inPlaceReplyBob.doneFast();
+                replyBuilder->setMetadata(rpc::makeEmptyMetadata());
+                return;
+            }
+        }
 
         {
             bool commandCanRunOnSecondary = command->slaveOk();
@@ -1318,7 +1356,7 @@ void Command::execCommand(OperationContext* txn,
                 rpc::ServerSelectionMetadata::get(txn).canRunOnSecondary();
 
             bool iAmStandalone = !txn->writesAreReplicated();
-            bool canRunHere = iAmPrimary || commandCanRunOnSecondary ||
+            bool canRunHere = canAcceptWrites || commandCanRunOnSecondary ||
                 commandIsOverriddenToRunOnSecondary || iAmStandalone;
 
             // This logic is clearer if we don't have to invert it.
@@ -1366,12 +1404,10 @@ void Command::execCommand(OperationContext* txn,
 
         // Operations are only versioned against the primary. We also make sure not to redo shard
         // version handling if this command was issued via the direct client.
-        if (iAmPrimary && !txn->getClient()->isInDirectClient()) {
+        if (canAcceptWrites && !txn->getClient()->isInDirectClient()) {
             // Handle shard version and config optime information that may have been sent along with
             // the command.
             auto& oss = OperationShardingState::get(txn);
-
-            auto commandNS = NamespaceString(command->parseNs(dbname, request.getCommandArgs()));
             oss.initializeShardVersion(commandNS, extractedFields[kShardVersionFieldIdx]);
 
             auto shardingState = ShardingState::get(txn);
@@ -1544,12 +1580,11 @@ bool Command::run(OperationContext* txn,
     const NamespaceString nss(parseNs(db, cmd));
 
     if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-        if (cmd.hasField("insert") || cmd.hasField("update") || 
-            cmd.hasField("delete") || cmd.hasField("findAndModify")) {
-            auto result = appendCommandStatus(
-                inPlaceReplyBob,
-                {ErrorCodes::CommandNotSupportedOnView,
-                 str::stream() << "Command not supported on views."});
+        if (cmd.hasField("insert") || cmd.hasField("update") || cmd.hasField("delete") ||
+            cmd.hasField("findAndModify")) {
+            auto result = appendCommandStatus(inPlaceReplyBob,
+                                              {ErrorCodes::CommandNotSupportedOnView,
+                                               str::stream() << "Command not supported on views."});
             inPlaceReplyBob.doneFast();
             replyBuilder->setMetadata(rpc::makeEmptyMetadata());
             return result;

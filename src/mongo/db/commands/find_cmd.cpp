@@ -53,6 +53,7 @@
 #include "mongo/db/service_context.h"
 #include "mongo/db/stats/counters.h"
 #include "mongo/db/views/view_catalog.h"
+#include "mongo/db/views/view_transform.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -60,109 +61,6 @@ namespace mongo {
 namespace {
 
 const char kTermField[] = "term";
-
-bool isValidQuery(const BSONObj& o) {
-    // log() << "Query: " << o.jsonString();
-    for (BSONElement e : o) {
-        // log() << "Element: " << e;
-        if (e.type() == Object || e.type() == Array) {
-            if (!isValidQuery(e.Obj())) {
-                return false;
-            }
-        } else {
-            StringData fieldName = e.fieldNameStringData();
-            if (fieldName == "$where" || fieldName == "$elemMatch" || fieldName == "$near" ||
-                fieldName == "$geoWithin" || fieldName == "$geoIntersects" || 
-                fieldName == "$nearSphere") {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-BSONObj convertToAggregate(const BSONObj& cmd, bool hasExplain) {
-    log() << cmd.jsonString();
-    BSONObjBuilder b;
-    std::vector<BSONObj> pipeline;
-
-    // Options that we do not support
-    if (cmd.getBoolField("singleBatch") || cmd.hasField("hint") || cmd.hasField("maxScan") ||
-        cmd.hasField("max") || cmd.hasField("min") || cmd.hasField("returnKey") ||
-        cmd.hasField("tailable") || cmd.hasField("showRecordId") || cmd.hasField("snapshot") ||
-        cmd.hasField("oplogReplay") || cmd.hasField("noCursorTimeut") ||
-        cmd.hasField("awaitData") || cmd.hasField("allowPartialResults")) {
-        return BSONObj();
-    }
-
-    // Build the pipeline
-    if (cmd.hasField("filter")) {
-        BSONObj value = cmd.getObjectField("filter");
-        // We do not support these operators
-        // if (!isValidQuery(cmd)) {
-        //     return BSONObj();
-        // }
-        pipeline.push_back(BSON("$match" << value));
-    }
-    if (cmd.hasField("sort")) {
-        BSONObj value = cmd.getObjectField("sort");
-        if (value.hasField("$natural")) {
-            // Do not support $natural
-            return BSONObj();
-        }
-        pipeline.push_back(BSON("$sort" << value));
-    }
-    if (cmd.hasField("skip")) {
-        pipeline.push_back(BSON("$skip" << cmd.getIntField("skip")));
-    }
-    if (cmd.hasField("limit")) {
-        pipeline.push_back(BSON("$limit" << cmd.getIntField("limit")));
-    }
-    if (cmd.hasField("projection")) {
-        BSONObj value = cmd.getObjectField("projection");
-        if (!value.isEmpty()) {
-            bool hasOutputField = false;
-            for (BSONElement e : value) {
-                const char* fieldName = e.fieldName();
-                if (StringData(fieldName) != "_id" && e.numberInt() == 1) {
-                    hasOutputField = true;
-                    break;
-                }
-            }
-            if (!hasOutputField) {
-                return BSONObj();
-            }
-            pipeline.push_back(BSON("$project" << value));
-        }
-        for (BSONElement e : value) {
-            // Only support simple 0 or 1 projection
-            const char* fieldName = e.fieldName();
-            if (fieldName[e.fieldNameSize() - 2] == '$') {
-                return BSONObj();
-            }
-            if (!e.isNumber()) {
-                return BSONObj();
-            }
-        }
-    }
-
-    b.append("aggregate", cmd["find"].str());
-    b.append("pipeline", pipeline);
-
-    if (cmd.hasField("batchSize")) {
-        b.append("cursor", BSON("batchSize" << cmd.getIntField("batchSize")));
-    } else {
-        b.append("cursor", BSONObj());
-    }
-    if (hasExplain) {
-        b.append("explain", true);
-    }
-    if (cmd.hasField("maxTimeMS")) {
-        b.append("maxTimeMS", cmd.getIntField("maxTimeMS"));
-    }
-
-    return b.obj();
-}
 
 }  // namespace
 
@@ -242,7 +140,7 @@ public:
 
         /* Check if this is running on a view */
         if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            BSONObj explainCmd = convertToAggregate(cmdObj, true);
+            BSONObj explainCmd = ViewTransform::findToViewAggregation(cmdObj, true);
             if (!explainCmd.isEmpty()) {
                 Command* c = Command::findCommand("aggregate");
                 std::string errMsg;
@@ -250,8 +148,7 @@ public:
                 if (retVal) {
                     return Status::OK();
                 }
-            }
-            else {
+            } else {
                 return {ErrorCodes::OptionNotSupportedOnView,
                         str::stream() << "One or more options not supported on view."};
             }
@@ -316,15 +213,16 @@ public:
 
         // Check if this query is being performed on a view.
         if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-            BSONObj match = convertToAggregate(cmdObj, false);
+            BSONObj match = ViewTransform::findToViewAggregation(cmdObj, false);
             if (!match.isEmpty()) {
                 Command* c = Command::findCommand("aggregate");
                 bool retval = c->run(txn, dbname, match, options, errmsg, result);
                 return retval;
             } else {
-                return appendCommandStatus(result,
-                                       {ErrorCodes::OptionNotSupportedOnView,
-                                        str::stream() << "One or more option not supported on views."});
+                return appendCommandStatus(
+                    result,
+                    {ErrorCodes::OptionNotSupportedOnView,
+                     str::stream() << "One or more option not supported on views."});
             }
         }
 

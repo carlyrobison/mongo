@@ -12,6 +12,7 @@ env.Library(
         '$BUILD_DIR/mongo/db/query/query_common',
         "cluster_client_cursor",
         "cluster_cursor_cleanup_job",
+        'cluster_views',
         "store_possible_cursor",
     ],
 )
@@ -62,10 +63,21 @@ env.Library(
         "cluster_client_cursor_params.cpp",
     ],
     LIBDEPS=[
+        'cluster_views',
         "$BUILD_DIR/mongo/db/query/command_request_response",
         "$BUILD_DIR/mongo/executor/task_executor_interface",
         "$BUILD_DIR/mongo/s/client/sharding_client",
         "$BUILD_DIR/mongo/s/coreshard",
+    ],
+)
+
+env.Library(
+    target="cluster_views",
+    source=[
+        "view_util.cpp",
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/util/decorable',
     ],
 )
 
