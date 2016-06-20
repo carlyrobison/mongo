@@ -377,7 +377,7 @@ public:
                 if (autoDb.getDb()->getView(nsString.ns())) {
                     return appendCommandStatus(result,
                                                {ErrorCodes::CommandNotSupportedOnView,
-                                                   "findAndModify not supported on views"});
+                                                "findAndModify not supported on views"});
                 }
                 Lock::CollectionLock collLock(txn->lockState(), nsString.ns(), MODE_IX);
 
@@ -450,7 +450,7 @@ public:
                 if (autoDb.getDb()->getView(nsString.ns())) {
                     return appendCommandStatus(result,
                                                {ErrorCodes::CommandNotSupportedOnView,
-                                                   "findAndModify not supported on views"});
+                                                "findAndModify not supported on views"});
                 }
 
                 Lock::CollectionLock collLock(txn->lockState(), nsString.ns(), MODE_IX);

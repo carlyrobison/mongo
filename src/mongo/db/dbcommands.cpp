@@ -1312,49 +1312,52 @@ void Command::execCommand(OperationContext* txn,
             repl::ReplicationCoordinator::get(txn->getClient()->getServiceContext());
         const bool canAcceptWrites = replCoord->canAcceptWritesForDatabase(dbname);
         const auto commandNS = NamespaceString(command->parseNs(dbname, request.getCommandArgs()));
-        const bool isView;
-        { 
-            // TODO: We shouldn't be grabbing this lock just to confirm this is a view. Need a
-            // better solution.
-            AutoGetCollectionOrViewForRead ctx(txn, ns);
-            Collection* collection = ctx.getCollection();
-            isView = ctx.getView();
-        }
-        // Depends on SERVER-24126 for proper behavior. Will need a rebase to pick up.
-        const auto isShardAware = serverGlobalParams.clusterRole == ClusterRole::ShardServer;
 
-        // Views in a cluster may be built on a sharded collection. Secondaries don't understand
-        if (isView && isShardAware) {
-            // TODO: Do we need to support DBDirectClient here?
-            invariant(!txn->getClient()->isInDirectClient());
+        // // TODO: We can't afford to grab a lock solely for view lookup. Need a
+        // // better solution.
+        // if (!NamespaceString::internalDb(commandNS.ns())) {
+        //     AutoGetCollectionOrViewForRead ctx(txn, commandNS);
+        //     bool isView = ctx.getView();
 
-            // TODO: This call may be expensive if we don't need the definition. Add quick lookup
-            // for underlying collection.
-            // TODO: We are not under lock atm so no guarantee this view still exists.
-            auto view = ViewCatalog::getInstance()->resolveView(txn, commandNS.ns());
+        //     // Depends on SERVER-24126 for proper behavior. Will need a rebase to pick up.
+        //     const auto isShardAware = serverGlobalParams.clusterRole == ClusterRole::ShardServer;
 
-            const auto& sourceNs = std::get<0>(view);
-            const auto sourceColIsSharded =
-                (ShardingState::get(txn)->getCollectionMetadata(sourceNs)->getNumChunks() > 0);
+        //     // Views in a cluster may be built on a sharded collection. Secondaries don't
+        //     understand
+        //     if (isView && isShardAware) {
+        //         // TODO: Do we need to support DBDirectClient here?
+        //         invariant(!txn->getClient()->isInDirectClient());
 
-            if (!canAcceptWrites || sourceColIsSharded) {
-                BSONObjBuilder inPlaceReplyBob(
-                    replyBuilder->getInPlaceReplyBuilder(command->reserveBytesForReply()));
+        //         // TODO: This call may be expensive if we don't need the definition. Add quick
+        //         lookup
+        //         // for underlying collection.
+        //         // TODO: We are not under lock atm so no guarantee this view still exists.
+        //         auto view = ctx.getDb()->getViewCatalog()->resolveView(txn, commandNS.ns());
 
-                BSONObjBuilder viewBob;
-                viewBob.append("ns", sourceNs);
-                viewBob.append("pipeline", std::get<1>(view));
+        //         const auto& sourceNs = std::get<0>(view);
+        //         const auto sourceColIsSharded =
+        //             (ShardingState::get(txn)->getCollectionMetadata(sourceNs)->getNumChunks() >
+        //             0);
 
-                inPlaceReplyBob.append("resolvedView", viewBob.obj());
-                appendCommandStatus(
-                    inPlaceReplyBob,
-                    {ErrorCodes::ViewMustRunOnMongos,
-                     str::stream() << "Command on view must be executed by mongos"});
-                inPlaceReplyBob.doneFast();
-                replyBuilder->setMetadata(rpc::makeEmptyMetadata());
-                return;
-            }
-        }
+        //         if (!canAcceptWrites || sourceColIsSharded) {
+        //             BSONObjBuilder inPlaceReplyBob(
+        //                 replyBuilder->getInPlaceReplyBuilder(command->reserveBytesForReply()));
+
+        //             BSONObjBuilder viewBob;
+        //             viewBob.append("ns", sourceNs);
+        //             viewBob.append("pipeline", std::get<1>(view));
+
+        //             inPlaceReplyBob.append("resolvedView", viewBob.obj());
+        //             appendCommandStatus(
+        //                 inPlaceReplyBob,
+        //                 {ErrorCodes::ViewMustRunOnMongos,
+        //                  str::stream() << "Command on view must be executed by mongos"});
+        //             inPlaceReplyBob.doneFast();
+        //             replyBuilder->setMetadata(rpc::makeEmptyMetadata());
+        //             return;
+        //         }
+        //     }
+        // }
 
         {
             bool commandCanRunOnSecondary = command->slaveOk();

@@ -35,8 +35,8 @@
 #include "mongo/db/catalog/database.h"
 
 #include <algorithm>
-#include <memory>
 #include <boost/filesystem/operations.hpp>
+#include <memory>
 #include <memory>
 
 #include "mongo/db/audit.h"
