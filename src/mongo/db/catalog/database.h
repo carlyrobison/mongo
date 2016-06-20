@@ -158,7 +158,7 @@ public:
                                  StringData ns,
                                  const CollectionOptions& options = CollectionOptions(),
                                  bool createDefaultIndexes = true);
-
+    void createView(OperationContext* txn, StringData ns, const CollectionOptions& options);
     /**
      * @param ns - this is fully qualified, which is maybe not ideal ???
      */
@@ -207,6 +207,10 @@ public:
         return _indexesName;
     }
 
+    const std::string& getSystemViewsName() const {
+        return _viewsName;
+    }
+
 private:
     /**
      * Gets or creates collection instance from existing metadata,
@@ -216,6 +220,11 @@ private:
      * by the caller, who takes onership of the Collection*
      */
     Collection* _getOrCreateCollectionInstance(OperationContext* txn, StringData fullns);
+
+    /**
+     * Raises uassert if there is a reason 'ns' cannot be created as user collection.
+     */
+    void _checkCanCreateCollection(const NamespaceString& nss, const CollectionOptions& options);
 
     /**
      * Deregisters and invalidates all cursors on collection 'fullns'.  Callers must specify

@@ -27,7 +27,7 @@
     //    pipeline: [ { $limit: 1 }, { $indexStats: {} } ] } ));
 
     // Views should be listed along with collections, searchable via listCollections, etc.
-    assert.eq(2, viewsDB.getCollectionNames().length);
+    assert.eq(3, viewsDB.getCollectionNames().length);
     var res = viewsDB.runCommand({listCollections: 1, filter: {"options.viewOn": {$exists: true}}});
     assert.commandWorked(res);
     assert(arrayEq(res.cursor.firstBatch,

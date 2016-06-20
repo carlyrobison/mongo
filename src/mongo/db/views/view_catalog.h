@@ -46,6 +46,7 @@
 #include "mongo/util/string_map.h"
 
 namespace mongo {
+class Database;
 
 // In-memory data structure that holds view definitions
 class ViewCatalog {
@@ -53,6 +54,8 @@ public:
     // TODO(SERVER-23700): Make this a unique_ptr once StringMap supports move-only types.
     typedef StringMap<std::shared_ptr<ViewDefinition>> ViewMap;
     static const std::uint32_t kMaxViewDepth;
+
+    ViewCatalog(OperationContext* txn, Database* database);
 
     ViewMap::const_iterator begin() const {
         return _viewMap.begin();
@@ -71,20 +74,18 @@ public:
                       const BSONObj& pipeline);
 
     /**
-     * Drop a view. Requires a fully qualified namespace
+     * Drop a view.
      */
-    void removeFromCatalog(StringData fullNs);
+    void dropView(OperationContext* txn, const NamespaceString& viewName);
 
     /**
      * Look up the namespace in the view catalog, returning a pointer to a View definition, or
      * nullptr if it doesn't exist. Note that the caller does not own the pointer.
      *
-     * @param ns The namespace in question
-     * @returns A bare pointer to a view definition if ns is a valid view with a backing namespace
+     * @param ns The full namespace string of the view.
+     * @returns A bare pointer to a view definition if ns is a valid view with a backing namespace.
      */
     ViewDefinition* lookup(StringData ns);
-
-    ViewDefinition* lookup(StringData dbName, StringData viewName);
 
     /**
      * Resolve the views on the given namespace, transforming the pipeline appropriately.
@@ -94,6 +95,7 @@ public:
     std::tuple<std::string, std::vector<BSONObj>> resolveView(OperationContext* txn, StringData ns);
 
 private:
+    Database* _db;
     ViewMap _viewMap;
 };
 }  // namespace mongo

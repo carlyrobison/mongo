@@ -220,6 +220,9 @@ Database::Database(OperationContext* txn, StringData name, DatabaseCatalogEntry*
         const string ns = *it;
         _collections[ns] = _getOrCreateCollectionInstance(txn, ns);
     }
+    if (_collections[_viewsName]) {
+        _views = stdx::make_unique<ViewCatalog>(txn, this);
+    }
 }
 
 
@@ -351,7 +354,7 @@ void Database::getStats(OperationContext* opCtx, BSONObjBuilder* output, double 
 }
 
 void Database::dropView(OperationContext* txn, StringData fullns) {
-    _views->removeFromCatalog(fullns);
+    _views->dropView(txn, NamespaceString(fullns));
 }
 
 Status Database::dropCollection(OperationContext* txn, StringData fullns) {
@@ -491,49 +494,58 @@ Collection* Database::getOrCreateCollection(OperationContext* txn, StringData ns
     return c;
 }
 
+void Database::_checkCanCreateCollection(const NamespaceString& nss,
+                                         const CollectionOptions& options) {
+    massert(17399, "collection already exists", getCollection(nss.ns()) == NULL);
+    massertNamespaceNotIndex(nss.ns(), "createCollection");
+
+    uassert(14037,
+            "can't create user databases on a --configsvr instance",
+            serverGlobalParams.clusterRole != ClusterRole::ConfigServer || nss.isOnInternalDb());
+
+    // This check only applies for actual collections, not indexes or other types of ns.
+    uassert(17381,
+            str::stream() << "fully qualified namespace " << nss.ns() << " is too long "
+                          << "(max is "
+                          << NamespaceString::MaxNsCollectionLen
+                          << " bytes)",
+            !nss.isNormal() || nss.size() <= NamespaceString::MaxNsCollectionLen);
+
+    uassert(17316, "cannot create a blank collection", nss.coll() > 0);
+    uassert(28838, "cannot create a non-capped oplog collection", options.capped || !nss.isOplog());
+}
+
+void Database::createView(OperationContext* txn, StringData ns, const CollectionOptions& options) {
+    invariant(txn->lockState()->isDbLockedForMode(name(), MODE_X));
+    invariant(options.isView());
+
+    NamespaceString nss(ns);
+    _checkCanCreateCollection(nss, options);
+    audit::logCreateCollection(&cc(), ns);
+
+    uassert(ErrorCodes::InvalidNamespace,
+            "invalid namespace name for a view: " + nss.toString(),
+            !nss.isOplog());
+
+    if (!_views) {
+        _views = stdx::make_unique<ViewCatalog>(txn, this);
+    }
+
+    LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
+           << options.viewNamespace << " with pipeline " << options.pipeline;
+    uassertStatusOK(_views->createView(txn, nss, options.viewNamespace, options.pipeline));
+}
+
+
 Collection* Database::createCollection(OperationContext* txn,
                                        StringData ns,
                                        const CollectionOptions& options,
                                        bool createIdIndex) {
-    massert(17399, "collection already exists", getCollection(ns) == NULL);
-    massertNamespaceNotIndex(ns, "createCollection");
     invariant(txn->lockState()->isDbLockedForMode(name(), MODE_X));
-
-    if (serverGlobalParams.clusterRole == ClusterRole::ConfigServer &&
-        !(ns.startsWith("config.") || ns.startsWith("local.") || ns.startsWith("admin."))) {
-        uasserted(14037, "can't create user databases on a --configsvr instance");
-    }
-
-    if (NamespaceString::normal(ns)) {
-        // This check only applies for actual collections, not indexes or other types of ns.
-        uassert(17381,
-                str::stream() << "fully qualified namespace " << ns << " is too long "
-                              << "(max is "
-                              << NamespaceString::MaxNsCollectionLen
-                              << " bytes)",
-                ns.size() <= NamespaceString::MaxNsCollectionLen);
-    }
+    invariant(!options.isView());
 
     NamespaceString nss(ns);
-    uassert(17316, "cannot create a blank collection", nss.coll() > 0);
-    uassert(28838, "cannot create a non-capped oplog collection", options.capped || !nss.isOplog());
-
-    // If "viewOn" is specified, create a new view. Otherwise, default to creating a collection.
-    if (options.isView()) {
-        invariant(!createIdIndex);
-        uassert(ErrorCodes::InvalidNamespace,
-                "invalid namespace name for a view: " + nss.toString(),
-                !nss.isOplog());
-        if (!_views) {
-            _views = stdx::make_unique<ViewCatalog>();
-        }
-        uassertStatusOK(_views->createView(txn, nss, options.viewNamespace, options.pipeline));
-
-        LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
-               << options.viewNamespace << " with pipeline " << options.pipeline;
-        audit::logCreateCollection(&cc(), ns);
-        return nullptr;
-    }
+    _checkCanCreateCollection(nss, options);
     audit::logCreateCollection(&cc(), ns);
 
     txn->recoveryUnit()->registerChange(new AddCollectionChange(txn, this, ns));
@@ -689,10 +701,11 @@ Status userCreateNS(OperationContext* txn,
         }
     }
 
-    invariant(
-        db->createCollection(
-            txn, ns, collectionOptions, createDefaultIndexes && !collectionOptions.isView()) ||
-        collectionOptions.isView());
+    if (collectionOptions.isView()) {
+        db->createView(txn, ns, collectionOptions);
+    } else {
+        invariant(db->createCollection(txn, ns, collectionOptions, createDefaultIndexes));
+    }
 
     return Status::OK();
 }

@@ -191,8 +191,7 @@ public:
         if (db && db->getView(ns.ns())) {
             errmsg = "cannot create indexes on a view";
             return appendCommandStatus(result,
-                                       Status(ErrorCodes::CommandNotSupportedOnView,
-                                              str::stream() << "Cannot create indexes on a view"));
+                                       Status(ErrorCodes::CommandNotSupportedOnView, errmsg));
         }
 
         if (!db) {

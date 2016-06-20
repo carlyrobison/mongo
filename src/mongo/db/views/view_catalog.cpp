@@ -39,17 +39,47 @@
 #include <tuple>
 
 #include "mongo/base/string_data.h"
+#include "mongo/db/catalog/collection.h"
 #include "mongo/db/catalog/collection_options.h"
+#include "mongo/db/catalog/database.h"
+#include "mongo/db/dbhelpers.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/pipeline.h"
+#include "mongo/db/storage/record_data.h"
 #include "mongo/db/views/view.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
 
 const std::uint32_t ViewCatalog::kMaxViewDepth = 20;
+
+ViewCatalog::ViewCatalog(OperationContext* txn, Database* database) : _db(database) {
+    Collection* systemViews = database->getCollection(database->getSystemViewsName());
+    if (!systemViews)
+        return;
+
+    auto cursor = systemViews->getCursor(txn);
+    while (auto record = cursor->next()) {
+        RecordData& data = record->data;
+
+        // Check the document is valid BSON with only the expected fields.
+        fassertStatusOK(40143, validateBSON(data.data(), data.size()));
+        BSONObj viewDef = data.toBson();
+
+        // Make sure we fail when new fields get added to the definition, so we fail safe in case
+        // of future format upgrades.
+        for (const BSONElement& e : viewDef) {
+            std::string name(e.fieldName());
+            fassert(40144, name == "_id" || name == "viewOn" || name == "pipeline");
+        }
+        NamespaceString viewName(viewDef["_id"].str());
+        fassert(40145, viewName.db() == database->name());
+        _viewMap[viewDef["_id"].str()] = std::make_shared<ViewDefinition>(
+            viewName.db(), viewName.coll(), viewDef["viewOn"].str(), viewDef["pipeline"].Obj());
+    }
+}
 
 Status ViewCatalog::createView(OperationContext* txn,
                                const NamespaceString& viewName,
@@ -60,10 +90,33 @@ Status ViewCatalog::createView(OperationContext* txn,
         LOG(3) << "VIEWS: Attempted to create a duplicate view";
         return Status(ErrorCodes::NamespaceExists, "Namespace already exists");
     }
+    BSONObj viewDef = BSON("_id" << viewName.ns() << "viewOn" << viewOn << "pipeline" << pipeline);
+    Collection* systemViews = _db->getOrCreateCollection(txn, _db->getSystemViewsName());
+    OpDebug* opDebug = nullptr;
+    bool enforceQuota = false;
+    systemViews->insertDocument(txn, viewDef, opDebug, enforceQuota);
 
-    _viewMap[viewName.ns()] =
-        std::make_shared<ViewDefinition>(viewName.db(), viewName.coll(), viewOn, pipeline);
+    BSONObj ownedPipeline = pipeline.getOwned();
+    txn->recoveryUnit()->onCommit([this, viewName, viewOn, ownedPipeline]() {
+        _viewMap[viewName.ns()] =
+            std::make_shared<ViewDefinition>(viewName.db(), viewName.coll(), viewOn, ownedPipeline);
+    });
     return Status::OK();
+}
+
+void ViewCatalog::dropView(OperationContext* txn, const NamespaceString& viewName) {
+    bool requireIndex = false;
+    Collection* systemViews = _db->getCollection(_db->getSystemViewsName());
+    if (!systemViews)
+        return;
+    RecordId id = Helpers::findOne(txn, systemViews, BSON("_id" << viewName.ns()), requireIndex);
+    if (!id.isNormal())
+        return;
+
+    OpDebug* opDebug = nullptr;
+    systemViews->deleteDocument(txn, id, opDebug);
+
+    txn->recoveryUnit()->onCommit([this, viewName]() { this->_viewMap.erase(viewName.ns()); });
 }
 
 ViewDefinition* ViewCatalog::lookup(StringData ns) {
@@ -72,14 +125,6 @@ ViewDefinition* ViewCatalog::lookup(StringData ns) {
         return it->second.get();
     }
     return nullptr;
-}
-
-void ViewCatalog::removeFromCatalog(StringData fullNs) {
-    _viewMap.erase(fullNs);
-}
-
-ViewDefinition* ViewCatalog::lookup(StringData dbName, StringData viewName) {
-    return lookup(StringData(NamespaceString(dbName, viewName).ns()));
 }
 
 std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(OperationContext* txn,
