@@ -53,6 +53,8 @@
 #include "mongo/db/service_context.h"
 #include "mongo/db/stats/counters.h"
 #include "mongo/db/views/view_sharding_check.h"
+#include "mongo/db/views/view_catalog.h"
+#include "mongo/db/timeseries/timeseries.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -282,14 +284,45 @@ public:
         // Check if this query is being performed on a view.
         if (auto view = ctx.getView()) {
 
-            ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
-            if (!viewShardingCheck.canRunOnMongod()) {
-                viewShardingCheck.appendResolvedView(result);
 
-                return appendCommandStatus(
-                    result,
-                    {ErrorCodes::ViewMustRunOnMongos,
-                     str::stream() << "Command on view must be executed by mongos"});
+            // Check if this is a time series
+            // log() << cmdObj;
+            if (cmdObj.getStringField("find") == std::string("timeseriesview")) {
+                // log() << "Detected time series view find request";
+
+                // Extract the _id value, and find with that.
+                BSONObj findQuery = cmdObj.getField("filter").Obj();
+                // log() << findQuery;
+                uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by _id.",
+                    findQuery.hasField("_id"));
+                uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by a date.",
+                    findQuery.getField("_id").type() == mongo::Date);
+
+                //log() << "Searching for time " << findQuery.getField("_id").Date();
+                
+                BSONObj obj = _globalTimeSeriesBatchManager.retrieve(findQuery.getField("_id").Date());
+                
+                // return the object
+                // log() << "Retrieved " << obj;
+                // log() << "Search completed. ";
+
+                // Generate the response object to send to the client.
+                CursorResponseBuilder firstBatch(true, &result);
+                firstBatch.append(obj);
+                CursorId cursorId = 0;
+                firstBatch.done(cursorId, nss.ns());
+                return true;
+
+            else {
+                ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
+                if (!viewShardingCheck.canRunOnMongod()) {
+                    viewShardingCheck.appendResolvedView(result);
+
+                    return appendCommandStatus(
+                        result,
+                        {ErrorCodes::ViewMustRunOnMongos,
+                         str::stream() << "Command on view must be executed by mongos"});
+                }
             }
 
             ctx.unlock();

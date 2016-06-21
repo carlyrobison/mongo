@@ -25,6 +25,7 @@ env.SConscript(
         'sorter',
         'stats',
         'storage',
+        'timeseries',
         'views',
     ],
 )
@@ -757,6 +758,7 @@ serveronlyLibdeps = [
     "storage/storage_engine_lock_file",
     "storage/storage_engine_metadata",
     "storage/storage_options",
+    "timeseries/timeseries",
     "update_index_data",
     "views/view_mongod",
 ]

@@ -243,6 +243,8 @@ private:
     const std::string _indexesName;  // "alleyinsider.system.indexes"
     const std::string _viewsName;    // "alleyinsider.system.views"
 
+    // TODO: add a pointer to the time series buffer
+
     int _profile;  // 0=off.
 
     CollectionMap _collections;

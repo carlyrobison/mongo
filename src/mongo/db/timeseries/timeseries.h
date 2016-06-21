@@ -37,6 +37,8 @@
 #include <string>
 #include <assert.h>
 
+#pragma once
+
 namespace mongo {
 
 using mongo::ErrorCodes;
@@ -68,7 +70,7 @@ public:
     /**
      * Constructs a batch object from the bson document.
      */
-    TimeSeriesBatch(const BSONObj& batchDoc);
+    TimeSeriesBatch(const BSONObj& batchDocument);
 
     TimeSeriesBatch() = default;
 
@@ -120,6 +122,9 @@ public:
     /* Inserts a document into the corresponding batch */
     void insert(const BSONObj& doc);
 
+    /* Loads a batch */
+    void loadBatch(const BSONObj& doc);
+
     /* Updates a document in the corresponding batch */
     void update(const BSONObj& doc);
 
@@ -141,6 +146,13 @@ private:
 
     /* Map of batch IDs to TSbatches */
     std::map<batchIdType, TimeSeriesBatch> _loadedBatches;
+
+    // namespace string of underlying collection _namespace;
+
+    // pointer to the database
 };
+
+// careful with this one: it's for testing
+extern TimeSeriesBatchManager _globalTimeSeriesBatchManager;
 
 }  // namespace mongo

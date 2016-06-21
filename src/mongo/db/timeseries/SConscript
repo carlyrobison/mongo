@@ -2,13 +2,23 @@
 
 Import("env")
 
+env.Library(
+    target= 'timeseries',
+        source=[
+            'timeseries.cpp',
+    ],
+     LIBDEPS=[
+        '$BUILD_DIR/mongo/base',
+    ]
+)
+
 env.CppUnitTest(
         target='timeseries_test',
         source=[
-            'timeseries.cpp',
             'timeseries_test.cpp',
         ],
         LIBDEPS=[
             '$BUILD_DIR/mongo/base',
+            '$BUILD_DIR/mongo/db/timeseries/timeseries'
         ],
 )

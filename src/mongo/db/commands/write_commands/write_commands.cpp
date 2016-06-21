@@ -26,6 +26,8 @@
  *    it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kDefault
+
 #include "mongo/base/init.h"
 #include "mongo/bson/mutable/document.h"
 #include "mongo/bson/mutable/element.h"
@@ -51,6 +53,7 @@
 #include "mongo/db/stats/counters.h"
 #include "mongo/db/write_concern.h"
 #include "mongo/s/stale_exception.h"
+#include "mongo/util/log.h"
 
 namespace mongo {
 
@@ -245,6 +248,7 @@ public:
     Status checkAuthForCommand(ClientBasic* client,
                                const std::string& dbname,
                                const BSONObj& cmdObj) final {
+
         return checkAuthForWriteCommand(client,
                                         BatchedCommandRequest::BatchType_Insert,
                                         NamespaceString(parseNs(dbname, cmdObj)),
@@ -255,14 +259,28 @@ public:
                  const std::string& dbname,
                  const BSONObj& cmdObj,
                  BSONObjBuilder& result) final {
-        const auto batch = parseInsertCommand(dbname, cmdObj);
-        const auto reply = performInserts(txn, batch);
-        serializeReply(txn,
-                       ReplyStyle::kNotUpdate,
-                       batch.continueOnError,
-                       batch.documents.size(),
-                       reply,
-                       &result);
+
+        // DOESN'T HIT THIS PATH...unless if it's not through a view
+        // Try inserting a timeseries object here
+        // catches writing straight to the collection
+        // if (cmdObj.getStringField("insert") == std::string("timeseriesview")) {
+        //     log() << "Detected time series, inserting into that.";
+        //     log() << cmdObj.getField("documents");
+        //     // for (BSONObj& doc : cmdObj.getField("documents").Array()) {
+        //     //     _globalTimeSeriesBatchManager.insert(doc);
+        //     //     log() << "Inserted " << doc.jsonString();
+        //     // }
+        // }
+        // else { // do stuff as normal
+            const auto batch = parseInsertCommand(dbname, cmdObj);
+            const auto reply = performInserts(txn, batch);
+            serializeReply(txn,
+                           ReplyStyle::kNotUpdate,
+                           batch.continueOnError,
+                           batch.documents.size(),
+                           reply,
+                           &result);
+        // }
     }
 } cmdInsert;
 

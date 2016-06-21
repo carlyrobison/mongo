@@ -28,14 +28,19 @@
 *    it in the license file.
 */
 
-#include "mongo/platform/basic.h"
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kDefault
 
+#include "mongo/platform/basic.h"
 #include "mongo/db/timeseries/timeseries.h"
+#include "mongo/util/log.h"
+
+
 
 namespace mongo {
 
 
-TimeSeriesBatch::TimeSeriesBatch(const BSONObj& batchDoc) {
+TimeSeriesBatch::TimeSeriesBatch(const BSONObj& batchDocument) {
+    BSONObj batchDoc = batchDocument.getOwned();
     // Create a map entry for each doc in the docs subarray.
     for (const BSONElement& elem : batchDoc["_docs"].Array()) {
         BSONObj obj = elem.Obj();
@@ -127,6 +132,16 @@ void TimeSeriesBatchManager::insert(const BSONObj& doc) {
     batch.insert(doc);
 }
 
+void TimeSeriesBatchManager::loadBatch(const BSONObj& doc) {
+    batchIdType batchId = doc["_id"].numberLong();
+
+    // Check that the batch id doesn't already exist in memory.
+    uassert(40155, "Cannot load a batch that already exists.",
+        _loadedBatches.find(batchId) == _loadedBatches.end());
+
+    _loadedBatches[batchId] = TimeSeriesBatch(doc);
+}
+
 void TimeSeriesBatchManager::update(const BSONObj& doc) {
 	Date_t date = doc.getField("_id").Date();
 
@@ -195,4 +210,7 @@ batchIdType TimeSeriesBatchManager::_getBatchId(const Date_t& time) {
 
 	return id;
 }
+
+// careful with this one: it's for testing
+TimeSeriesBatchManager _globalTimeSeriesBatchManager;
 }

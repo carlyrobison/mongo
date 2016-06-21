@@ -110,6 +110,7 @@
 #include "mongo/util/md5.hpp"
 #include "mongo/util/print.h"
 #include "mongo/util/scopeguard.h"
+#include "mongo/db/timeseries/timeseries.h"
 
 namespace mongo {
 
@@ -1550,6 +1551,62 @@ bool Command::run(OperationContext* txn,
     const std::string db = request.getDatabase().toString();
 
     const NamespaceString nss(parseNs(db, cmd));
+
+    if (ViewCatalog::getInstance()->lookup(nss.ns())) {
+        if (cmd.hasField("insert") || cmd.hasField("update") || cmd.hasField("delete") ||
+            cmd.hasField("findAndModify")) {
+
+            // log() << "It's a view, trying to modify";
+            // log() << cmd;
+            // Detect a time series view.
+            if (cmd.hasField("insert") && (cmd.getStringField("insert") == std::string("timeseriesview"))) {
+                // log() << "Detected time series view insert attempt";
+                // log() << cmd.getField("documents");
+
+                // Insert the document.
+                for (auto doc : cmd.getField("documents").Obj()) {
+                  BSONObj obj = doc.Obj();
+                  // log() << "Inserting " << obj;
+
+                  uassert(ErrorCodes::UnsupportedFormat, "_id field required on insert.",
+                    obj.hasField("_id"));
+                  uassert(ErrorCodes::UnsupportedFormat, "_id field must contain a Date type.",
+                    obj.getField("_id").type() == mongo::Date);
+
+                  // create the object
+                  BSONObjBuilder builder;
+                  for (BSONElement field : obj) {
+                    const StringData fieldName = field.fieldNameStringData();
+                    if (fieldName == "_id") {
+                      builder.append("_id", field.Date());
+                    } else {
+                      builder.append(field);
+                    }
+                  }
+                  BSONObj docToInsert = builder.obj();
+                  // log() << "constructed " << docToInsert;
+
+                  // insert the object
+                  _globalTimeSeriesBatchManager.insert(docToInsert);
+                  // log() << "Insert of " << docToInsert << " completed.";
+                }
+
+                // deal with this Bob character
+                auto result = appendCommandStatus(inPlaceReplyBob, Status::OK());
+                inPlaceReplyBob.doneFast();
+                replyBuilder->setMetadata(rpc::makeEmptyMetadata());
+                return result;
+            }
+            else {
+              auto result = appendCommandStatus(inPlaceReplyBob,
+                                              {ErrorCodes::CommandNotSupportedOnView,
+                                               str::stream() << "Command not supported on views."});
+              inPlaceReplyBob.doneFast();
+              replyBuilder->setMetadata(rpc::makeEmptyMetadata());
+              return result;
+            }
+        }
+    }
 
     StatusWith<WriteConcernOptions> wcResult =
         extractWriteConcern(txn, cmd, db, this->supportsWriteConcern(cmd));
