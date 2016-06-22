@@ -67,6 +67,7 @@
 #include "mongo/db/views/view_catalog.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
+#include "mongo/bson/bsonobjbuilder.h"
 
 namespace mongo {
 
@@ -704,7 +705,47 @@ Status userCreateNS(OperationContext* txn,
     if (collectionOptions.isView()) {
         db->createView(txn, ns, collectionOptions);
     } else {
-        invariant(db->createCollection(txn, ns, collectionOptions, createDefaultIndexes));
+        if (collectionOptions.timeseries) {
+            /**
+             * When working with a timeseries, we want the collection name that they specify to 
+             * be the view name, and we create a backing collection, which is just ".timeseries"
+             * appended to the desired name.
+             */
+            NamespaceString nss(ns);
+            std::string viewName = nss.coll().toString(); // the desired name
+            std::string dbName = nss.db().toString();
+
+            // Create the backing collection
+            std::string backingViewName = viewName + "_" + "timeseries";
+            StringData backingNS = NamespaceString(dbName, backingViewName).ns();
+            uassert(ErrorCodes::NamespaceExists, "TS name conflicts with existing collection " + backingViewName,
+                db->getCollection(backingNS.toString()) == NULL);
+            invariant(db->createCollection(txn, backingNS, collectionOptions, createDefaultIndexes));
+            
+            // Construct the pipeline
+            // Trying to get: {[{$unwind: "_$docs"}]}
+            BSONArrayBuilder arrBuilder;
+            BSONObjBuilder objBuilder;
+            arrBuilder.append(objBuilder.append("$unwind", "$_docs").obj());
+
+            // Add the transform stage later
+            // BSONObjBuilder objBuilder2;
+            // arrBuilder.append(objBuilder2.append("$transform", "$_docs").obj());
+            BSONObj pipeline = arrBuilder.obj();
+
+            // Create the timeseries view
+            LOG(3) << "TIMESERIES: userCreateNS attempting to create " 
+                   << viewName << " with data in " << backingViewName << " with pipeline " 
+                   << pipeline;
+
+            // when merging, make sure this matches the above command for regular views
+            return ViewCatalog::getInstance()->createView(
+                txn, dbName, viewName, backingViewName, pipeline, true);
+
+        } else { // actually just a regular collection
+            LOG(3) << "JK: userCreateNS detecting an ordinary create collection command";
+            invariant(db->createCollection(txn, ns, collectionOptions, createDefaultIndexes));
+        }
     }
 
     return Status::OK();

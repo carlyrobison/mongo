@@ -1,5 +1,5 @@
 conn = new Mongo();
-db = conn.getDB("timeseriesview");
+db = conn.getDB("timeseriesview"); // can now randomly generate this
 
 // Drop the old database, this will also drop old views
 db.dropDatabase();
@@ -8,6 +8,7 @@ db.dropDatabase();
 db.data.insert([{}]);
 
 // Create the view
+// view can now have any name, except ones that <existing collection>_timeseries
 db.runCommand({"create": "timeseriesview", "view": "data", "pipeline": [{"$unwind": "$docs"}]});
 
 // Insert some dates

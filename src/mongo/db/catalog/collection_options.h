@@ -119,5 +119,8 @@ struct CollectionOptions {
     std::string viewNamespace;
     // The aggregation pipeline that defines this view.
     BSONObj pipeline;
+
+    // True if this collection is a timeseries one.
+    bool timeseries;
 };
 }

@@ -71,7 +71,8 @@ public:
     Status createView(OperationContext* txn,
                       const NamespaceString& viewName,
                       const std::string& viewOn,
-                      const BSONObj& pipeline);
+                      const BSONObj& pipeline,
+                      bool timeseries = false);
 
     /**
      * Drop a view.

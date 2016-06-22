@@ -47,13 +47,15 @@ public:
     ViewDefinition(StringData dbName,
                    StringData viewName,
                    StringData viewOn,
-                   const BSONObj& pipeline);
+                   const BSONObj& pipeline,
+                   bool timeseries = false);
 
     void operator=(const ViewDefinition& other) {
         _dbName = other._dbName;
         _viewName = other._viewName;
         _backingViewName = other._backingViewName;
         _pipeline = other._pipeline;
+        _timeseries = other._timeseries;
     }
 
     StringData name() const {
@@ -78,6 +80,10 @@ public:
 
     const std::vector<BSONObj>& pipeline() const {
         return _pipeline;
+    }
+
+    bool isTimeSeries() {
+        return _timeseries;
     }
 
     void changeBackingNs(std::string newNs);
@@ -108,5 +114,6 @@ private:
     std::string
         _backingViewName;  // The namespace of the view/collection upon which the view is based.
     std::vector<BSONObj> _pipeline;
+    bool _timeseries; // True if the view is a timeseries view
 };
 }  // namespace mongo

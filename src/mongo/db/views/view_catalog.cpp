@@ -91,7 +91,8 @@ ViewCatalog::ViewCatalog(OperationContext* txn, Database* database) : _db(databa
 Status ViewCatalog::createView(OperationContext* txn,
                                const NamespaceString& viewName,
                                const std::string& viewOn,
-                               const BSONObj& pipeline) {
+                               const BSONObj& pipeline,
+                               bool timeseries) {
     uassert(40188, "View support not enabled", enableViews);
     NamespaceString viewNss(viewName.db(), viewOn);
     if (lookup(StringData(viewName.ns()))) {
@@ -107,7 +108,7 @@ Status ViewCatalog::createView(OperationContext* txn,
     BSONObj ownedPipeline = pipeline.getOwned();
     txn->recoveryUnit()->onCommit([this, viewName, viewOn, ownedPipeline]() {
         _viewMap[viewName.ns()] =
-            std::make_shared<ViewDefinition>(viewName.db(), viewName.coll(), viewOn, ownedPipeline);
+            std::make_shared<ViewDefinition>(viewName.db(), viewName.coll(), viewOn, ownedPipeline, timeseries);
     });
     return Status::OK();
 }
@@ -121,11 +122,15 @@ void ViewCatalog::dropView(OperationContext* txn, const NamespaceString& viewNam
     if (!id.isNormal())
         return;
 
+<<<<<<< HEAD
     OpDebug* opDebug = nullptr;
     systemViews->deleteDocument(txn, id, opDebug);
 
     txn->recoveryUnit()->onCommit([this, viewName]() { this->_viewMap.erase(viewName.ns()); });
 }
+=======
+ViewDefinition* ViewCatalog::lookup(StringData ns) {
+>>>>>>> 27a66a9... Create timeseries collections using db.runCommand(create: <collection name>, timeseries: true).
 
 ViewDefinition* ViewCatalog::lookup(StringData ns) {
     ViewMap::const_iterator it = _viewMap.find(ns);

@@ -48,10 +48,13 @@ namespace mongo {
 ViewDefinition::ViewDefinition(StringData dbName,
                                StringData viewName,
                                StringData viewOn,
-                               const BSONObj& pipeline)
+                               const BSONObj& pipeline,
+                               bool timeseries)
     : _dbName(dbName.toString()),
       _viewName(viewName.toString()),
-      _backingViewName(viewOn.toString()) {
+      _backingViewName(viewOn.toString()),
+      _timeseries = timeseries {
+
     for (BSONElement e : pipeline) {
         _pipeline.push_back(e.Obj().getOwned());
     }
