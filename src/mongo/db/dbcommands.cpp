@@ -1563,10 +1563,12 @@ bool Command::run(OperationContext* txn,
                 // log() << "Detected time series view insert attempt";
                 // log() << cmd.getField("documents");
 
-                // Insert the document.
+                // Insert the documents.
+                // May not insert secondary documents correctly.
+                // In fact I think it omits them.
                 for (auto doc : cmd.getField("documents").Obj()) {
                   BSONObj obj = doc.Obj();
-                  // log() << "Inserting " << obj;
+                  //log() << "Inserting " << obj;
 
                   uassert(ErrorCodes::UnsupportedFormat, "_id field required on insert.",
                     obj.hasField("_id"));
@@ -1584,11 +1586,11 @@ bool Command::run(OperationContext* txn,
                     }
                   }
                   BSONObj docToInsert = builder.obj();
-                  // log() << "constructed " << docToInsert;
+                  //log() << "constructed " << docToInsert;
 
                   // insert the object
-                  _globalTimeSeriesBatchManager.insert(docToInsert);
-                  // log() << "Insert of " << docToInsert << " completed.";
+                  view->getTSManager()->insert(docToInsert);
+                  //log() << "Insert of " << docToInsert << " completed.";
                 }
 
                 // deal with this Bob character

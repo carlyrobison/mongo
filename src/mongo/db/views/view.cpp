@@ -53,8 +53,11 @@ ViewDefinition::ViewDefinition(StringData dbName,
     : _dbName(dbName.toString()),
       _viewName(viewName.toString()),
       _backingViewName(viewOn.toString()),
-      _timeseries = timeseries {
-
+      _timeseries = timeseries,
+    {
+    if (timeseries) {
+        tsManager = new TimeSeriesBatchManager();
+    } 
     for (BSONElement e : pipeline) {
         _pipeline.push_back(e.Obj().getOwned());
     }

@@ -288,11 +288,16 @@ public:
             // Check if this is a time series
             // log() << cmdObj;
             if (cmdObj.getStringField("find") == std::string("timeseriesview")) {
-                // log() << "Detected time series view find request";
+                                // log() << "Detected time series view find request";
 
                 // Extract the _id value, and find with that.
                 BSONObj findQuery = cmdObj.getField("filter").Obj();
                 // log() << findQuery;
+
+                // This is wrong when we just want to find() all of the timeseries data.
+                // Unless we don't want to support that.
+                // Actually this will be obsolete when we work with a collection.
+
                 uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by _id.",
                     findQuery.hasField("_id"));
                 uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by a date.",
@@ -300,11 +305,18 @@ public:
 
                 //log() << "Searching for time " << findQuery.getField("_id").Date();
                 
-                BSONObj obj = _globalTimeSeriesBatchManager.retrieve(findQuery.getField("_id").Date());
+                BSONObj obj = view->getTSManager()->retrieve(findQuery.getField("_id").Date());
                 
                 // return the object
-                // log() << "Retrieved " << obj;
-                // log() << "Search completed. ";
+                //log() << "Retrieved " << obj;
+                //log() << "Search completed. ";
+
+                /**
+                 * Collection world:
+                 * If the find command has a timestamp _id, then we add a $match on the batch
+                 * id to the beginning of the aggregation pipeline. (unsure how to implement)
+                 * Otherwise we just let views do its thing.
+                 */
 
                 // Generate the response object to send to the client.
                 CursorResponseBuilder firstBatch(true, &result);

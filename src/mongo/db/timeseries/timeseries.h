@@ -119,6 +119,8 @@ private:
  */
 class TimeSeriesBatchManager {
 public:
+    TimeSeriesBatchManager() = default;
+
     /* Inserts a document into the corresponding batch */
     void insert(const BSONObj& doc);
 
@@ -137,8 +139,6 @@ public:
     void remove(const Date_t& time);
 
     void removeBatch(const Date_t& time);
-
-    /* LoadBatch function? */
 
 private:
     /* Converts a date to the corresponding batch id number */

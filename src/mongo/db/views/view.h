@@ -38,6 +38,7 @@
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/util/mongoutils/str.h"
+#include "mongo/db/timeseries/timeseries.h"
 
 namespace mongo {
 
@@ -108,6 +109,10 @@ public:
         return ss;
     }
 
+    TimeSeriesBatchManager *getTSManager() {
+        return tsManager;
+    }
+
 private:
     std::string _dbName;
     std::string _viewName;  // The namespace of the view.
@@ -115,5 +120,7 @@ private:
         _backingViewName;  // The namespace of the view/collection upon which the view is based.
     std::vector<BSONObj> _pipeline;
     bool _timeseries; // True if the view is a timeseries view
+    TimeSeriesBatchManager *tsManager; // Exists if the timeseries exists
+
 };
 }  // namespace mongo
