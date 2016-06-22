@@ -7,8 +7,21 @@
     let assertCommandOrWriteFailed = function(res) {
         if (res.writeErrors !== undefined)
             assert.neq(0, res.writeErrors.length);
-        else
+        else {
             assert.commandFailed(res);
+            switch (res.code) {
+                case 160:  // ViewRecursionLimitExceeded
+                case 161:  // CommandNotSupportedOnView
+                case 162:  // OptionNotSupportedOnView
+                case 164:  // ViewMustRunOnMongos
+                    break;
+                default:
+                    assert(
+                        false,
+                        "Expected command to fail with a views-specific error code, but instead failed with " +
+                            res.code);
+            }
+        }
     };
 
     // Obtain a list of all commands.
@@ -22,11 +35,12 @@
 
         let test = viewsCommandTests[command];
         assert(test !== undefined,
-               "Coverage failure: must explicitly define a views test for command: " + command);
+               "Coverage failure: must explicitly define a views test for " + command);
 
-        // Tests can be explicitly skipped if they don't deal with namespaces.
-        if (test.skip) {
-            print("Skipping over views test for command: " + command);
+        // Tests can be explicitly skipped. Print the name of the skipped test, as well as the
+        // reason why.
+        if (test.skip !== undefined) {
+            print("Skipping " + command + ": " + test.skip);
             continue;
         }
 
@@ -46,7 +60,7 @@
 
         // Execute the command. The print statement is necessary because in the event of a failure,
         // there is no way to determine what command was actually running.
-        print("Running test for command: " + command);
+        print("Testing " + command);
 
         if (test.expectFailure)
             assertCommandOrWriteFailed(dbHandle.runCommand(test.command));

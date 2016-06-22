@@ -13,129 +13,134 @@
  * runs the command {insert: "views_insert"} and expects it to fail.
  */
 
+// Pre-written reasons for skipping a test.
+let isAnInternalCommand = "internal, non-user-facing command";
+let isUnrelated = "is unrelated and/or does not interact with namespaces";
+let needsToFailWithViewsErrorCode = "TO DO: needs to fail with a views-specific error code";
+let needsTriage = "TO DO: needs triage";
+
 var viewsCommandTests = {
-    _configsvrAddShard: {skip: true},
-    _getUserCacheGeneration: {skip: true},
-    _hashBSONElement: {skip: true},
-    _isSelf: {skip: true},
-    _mergeAuthzCollections: {skip: true},
-    _migrateClone: {skip: true},
-    _recvChunkAbort: {skip: true},
-    _recvChunkCommit: {skip: true},
-    _recvChunkStart: {skip: true},
-    _recvChunkStatus: {skip: true},
-    _transferMods: {skip: true},
-    aggregate: {command: {aggregate: "view"}},
-    appendOplogNote: {skip: true},
-    applyOps: {command: {applyOps: [{op: "i", o: {_id: 1}, ns: "test.view"}]}, expectFailure: true},
-    authSchemaUpgrade: {skip: true},
-    authenticate: {skip: true},
-    availableQueryOptions: {command: {availableQueryOptions: 1}},
-    buildInfo: {command: {buildInfo: 1}},
-    // TODO fails with "collection test.view does not exist" (code 26)
-    captrunc: {command: {captrunc: "view", n: 2, inc: false}, expectFailure: true},
-    checkShardingIndex: {command: {checkShardingIndex: 1}, skip: true},
-    // TODO
-    cleanupOrphaned: {command: {cleanupOrphaned: 1}, skip: true},
-    // TODO
-    clone: {command: {clone: ""}, skip: true},
-    // TODO skipping because of src/mongo/db/cloner.cpp:150. Also would need to set up two mongods.
-    cloneCollection: {command: {cloneCollection: "test.views"}, skip: true},
+    _configsvrAddShard: {skip: isAnInternalCommand},
+    _getUserCacheGeneration: {skip: isAnInternalCommand},
+    _hashBSONElement: {skip: isAnInternalCommand},
+    _isSelf: {skip: isAnInternalCommand},
+    _mergeAuthzCollections: {skip: isAnInternalCommand},
+    _migrateClone: {skip: isAnInternalCommand},
+    _recvChunkAbort: {skip: isAnInternalCommand},
+    _recvChunkCommit: {skip: isAnInternalCommand},
+    _recvChunkStart: {skip: isAnInternalCommand},
+    _recvChunkStatus: {skip: isAnInternalCommand},
+    _transferMods: {skip: isAnInternalCommand},
+    aggregate: {skip: "tested in views/views_aggregation.js"},
+    appendOplogNote: {skip: isUnrelated},
+    applyOps: {command: {applyOps: [{op: "i", o: {_id: 1}, ns: "test.view"}]}, expectFailure: true, skip: needsToFailWithViewsErrorCode},
+    authSchemaUpgrade: {skip: isUnrelated},
+    authenticate: {skip: isUnrelated},
+    availableQueryOptions: {skip: isUnrelated},
+    buildInfo: {skip: isUnrelated},
+    captrunc: {
+        command: {captrunc: "view", n: 2, inc: false},
+        expectFailure: true,
+        skip: needsToFailWithViewsErrorCode
+    },
+    checkShardingIndex: {skip: isUnrelated},
+    cleanupOrphaned: {command: {cleanupOrphaned: 1}, skip: needsTriage},
+    clone: {
+        skip: "TO DO: need to write a separate test for clone, that cloning a db clones the views"
+    },
+    cloneCollection:
+        {command: {cloneCollection: "test.views"}, skip: needsToFailWithViewsErrorCode},
     cloneCollectionAsCapped: {
         command: {cloneCollectionAsCapped: "view", toCollection: "testcapped", size: 10240},
-        expectFailure: true
+        expectFailure: true,
+        skip: needsToFailWithViewsErrorCode
     },
     collMod: {command: {collMod: "view", viewOn: "other"}},
-    // TODO
-    collStats: {command: {collStats: "view"}, expectFailure: true},
-    compact: {command: {compact: "view"}, expectFailure: true},
-    configureFailPoint: {skip: true},
-    connPoolStats: {command: {connPoolStats: 1}, skipStandalone: 1},
-    connPoolSync: {command: {connPoolSync: 1}, skipStandalone: 1},
-    connectionStatus: {command: {connectionStatus: 1}},
-    // TODO: decide
-    convertToCapped: {command: {convertToCapped: "view"}, expectFailure: true},
-    // TODO: decide. note that this will say that it succeeded but actually is a no-op due to the
-    // lack of an actual collection.
-    copydb: {skip: true},
-    copydbgetnonce: {command: {copydbgetnonce: 1}, runOnDb: "admin", skip: true},
-    // TODO: ask spencer
-    copydbsaslstart:
-        {command: {copydbsaslstart: 1, mechanism: "PLAIN"}, runOnDb: "admin", skip: true},
-    count: {command: {count: "view"}},
-    create: {command: {create: "viewOnView", viewOn: "view"}},
+    collStats: {command: {collStats: "view"}, skip: "TO DO: need to fix this command to work"},
+    compact: {command: {compact: "view"}, expectFailure: true, skip: needsToFailWithViewsErrorCode},
+    configureFailPoint: {skip: isUnrelated},
+    connPoolStats: {skip: isUnrelated},
+    connPoolSync: {skip: isUnrelated},
+    connectionStatus: {skip: isUnrelated},
+    convertToCapped: {command: {convertToCapped: "view"}, skip: needsToFailWithViewsErrorCode},
+    copydb: {skip: "TO DO: write a separate test that copydb copies the views"},
+    copydbgetnonce: {skip: isUnrelated},
+    copydbsaslstart: {skip: isUnrelated},
+    count: {skip: "tested in views/views_basic.js"},
+    create: {skip: "tested in views/views_creation.js"},
     createIndexes: {
         command: {createIndexes: "view", indexes: [{key: {x: 1}, name: "x_1"}]},
         expectFailure: true
     },
     createRole: {command: {createRole: "testrole", privileges: [], roles: []}},
     createUser: {command: {createUser: "testuser", pwd: "testpass", roles: []}},
-    currentOp: {command: {currentOp: 1}, runOnDb: "admin"},
-    currentOpCtx: {command: {currentOpCtx: 1}},
-    // TODO: decide. it fails for now
-    dataSize: {command: {dataSize: "test.view"}, expectFailure: true},
-    // TODO: decide. note that running this returns ok: 1, but the hash for the view is not present.
-    dbHash: {command: {dbHash: 1}},
-    // TODO: Note: dbstats should show views. right now it only shows collections
-    dbStats: {command: {dbStats: 1}},
+    currentOp: {skip: isUnrelated},
+    currentOpCtx: {skip: isUnrelated},
+    dataSize: {
+        command: {dataSize: "test.view"},
+        expectFailure: true,
+        skip: needsToFailWithViewsErrorCode
+    },
+    dbHash: {
+        command: {dbHash: 1},
+        skip:
+            "TO DO: decide whether or not to make dbHash work, or error if a view is specified. Whatever is easier."
+    },
+    dbStats:
+        {command: {dbStats: 1}, skip: "TO DO: dbStats should show views as well as collections"},
     delete: {command: {delete: "view", deletes: [{q: {x: 1}, limit: 1}]}, expectFailure: true},
-    diagLogging: {command: {diagLogging: 1}, runOnDb: "admin"},
+    diagLogging: {skip: isUnrelated},
     distinct: {command: {distinct: "view", key: "x"}},
-    driverOIDTest: {command: {driverOIDTest: ObjectId("576951e357e2d6b424bef27b")}},
+    driverOIDTest: {skip: isUnrelated},
     drop: {command: {drop: "view"}},
-    dropAllRolesFromDatabase: {command: {dropAllRolesFromDatabase: 1}},
-    dropAllUsersFromDatabase: {command: {dropAllUsersFromDatabase: 1}},
+    dropAllRolesFromDatabase: {skip: isUnrelated},
+    dropAllUsersFromDatabase: {skip: isUnrelated},
     dropDatabase: {command: {dropDatabase: 1}},
-    // TODO: fails due to ns not found
-    dropIndexes: {command: {dropIndexes: "view"}, expectFailure: true},
+    dropIndexes: {
+        command: {dropIndexes: "view"},
+        expectFailure: true,
+        skip: "TO DO: this should either fail with a views-specific error OR be a no-op"
+    },
     dropRole: {
         command: {dropRole: "testrole"},
         setup: function(conn) {
             conn.runCommand({createRole: "testrole", privileges: [], roles: []});
         }
     },
-    dropUser: {
-        command: {dropUser: "testuser"},
-        setup: function(conn) {
-            conn.runCommand({createUser: "testuser", pwd: "testpass", roles: []});
-        }
-    },
-    // TODO: this fails as expected but with an awful backtrace
-    emptycapped: {command: {emptycapped: "view"}, expectFailure: true},
-    eval: {command: {eval: function() {}}},
+    dropUser: {skip: isUnrelated},
+    emptycapped:
+        {command: {emptycapped: "view"}, expectFailure: true, skip: needsToFailWithViewsErrorCode},
+    eval: {skip: "command is deprecated"},
     explain: {command: {explain: {count: "view"}}},
-    features: {command: {features: 1}},
-    filemd5: {command: {filemd5: ObjectId("5769628e57e2d6b424bef27c"), root: "fs"}},
-    find: {command: {find: "view"}},
-    findAndModify:
-        {command: {findAndModify: "view", query: {x: 1}, remove: true}, expectFailure: true},
-    forceerror: {command: {forceerror: 1}, expectFailure: true},
-    fsync: {command: {fsync: 1, async: true}, runOnDb: "admin"},
-    fsyncUnlock: {
-        command: {fsyncUnlock: 1},
+    features: {skip: isUnrelated},
+    filemd5: {skip: isUnrelated},
+    find: {skip: "tested in views/views_find.js"},
+    findAndModify: {skip: "tested in views/disallowed_crud_commands.js"},
+    forceerror: {skip: isUnrelated},
+    fsync: {skip: isUnrelated},
+    fsyncUnlock: {skip: isUnrelated},
+    geoNear: {skip: "tested in views/disallowed_crud_commands.js"},
+    geoSearch: {skip: "tested in views/disallowed_crud_commands.js"},
+    getCmdLineOpts: {skip: isUnrelated},
+    getLastError: {skip: isUnrelated},
+    getLog: {skip: isUnrelated},
+    getMore: {
+        command: {getMore: NumberLong(1), collection: "view"},
+        expectFailure: true,
+        skip:
+            "TO DO: we should support this. Cursors from operations on views should be cursors on the view namespace"
+    },
+    getParameter: {skip: isUnrelated},
+    getPrevError: {skip: isUnrelated},
+    getShardMap: {skip: isUnrelated},
+    getShardVersion: {
+        command: {getShardVersion: "test.view"},
         runOnDb: "admin",
-        setup: function(conn) {
-            conn.adminCommand({fsync: 1, lock: true});
-        }
+        expectFailure: true,
+        skip: "TO DO: this currently fails with a views error, but should it work? Talk to sharding"
     },
-    geoNear: {
-        command: {geoNear: "view", near: {type: "Point", coordnates: [-50, 37]}, spherical: true},
-        expectFailure: true
-    },
-    geoSearch: {command: {geoSearch: "view", search: {}, near: [50, -37]}, expectFailure: true},
-    getCmdLineOpts: {command: {getCmdLineOpts: 1}, runOnDb: "admin"},
-    getLastError: {command: {getLastError: 1}},
-    getLog: {command: {getLog: "startupWarnings"}, runOnDb: "admin"},
-    // TODO: This fails because it wants a getmore on a collection
-    getMore: {command: {getMore: NumberLong(1), collection: "view"}, expectFailure: true},
-    getParameter: {command: {getParameter: "*"}, runOnDb: "admin"},
-    getPrevError: {command: {getPrevError: 1}},
-    getShardMap: {command: {getShardMap: 1}, runOnDb: "admin", skipStandalone: true},
-    // TODO Fails with "namespace is a view, not a collection"
-    getShardVersion:
-        {command: {getShardVersion: "test.view"}, runOnDb: "admin", expectFailure: true},
-    getnonce: {command: {getnonce: 1}},
-    godinsert: {skip: true},
+    getnonce: {skip: isUnrelated},
+    godinsert: {skip: isAnInternalCommand},
     grantPrivilegesToRole: {
         command: {
             grantPrivilegesToRole: "testrole",
@@ -155,79 +160,83 @@ var viewsCommandTests = {
         command: {grantRolesToUser: "testuser", roles: ["read"]},
         setup: function(conn) {
             conn.runCommand({createUser: "testuser", pwd: "testpass", roles: []});
-        }
+        },
+        skip: "TO DO: need a more sophisticated authentication test for views"
     },
-    // TODO should write a fuller jstest for this
-    group: {command: {group: {ns: "test.view", key: "x", $reduce: function() {}, initial: {}}}},
-    handshake: {command: {handshake: 1}, skip: true},
-    hostInfo: {command: {hostInfo: 1}},
-    insert: {command: {insert: "view", documents: [{x: 1}]}, expectFailure: true},
-    invalidateUserCache: {command: {invalidateUserCache: 1}, runOnDb: "admin"},
-    isMaster: {command: {isMaster: 1}},
-    journalLatencyTest: {skip: true},
-    killCursors: {command: {killCursors: "views", cursors: [NumberLong(0)]}},
-    killOp: {command: {killOp: 1, op: 0}, runOnDb: "admin"},
-    listCollections: {command: {listCollections: 1}},
-    listCommands: {command: {listCommands: 1}},
-    listDatabases: {command: {listDatabases: 1}, runOnDb: "admin"},
-    // TODO: Fails because it is not a collection
-    listIndexes: {command: {listIndexes: "view"}, expectFailure: true},
-    lockInfo: {command: {lockInfo: 1}, runOnDb: "admin"},
-    logRotate: {command: {logRotate: 1}, runOnDb: "admin"},
-    logout: {command: {logout: 1}},
-    makeSnapshot: {skip: true},
-    mapReduce: {
-        command: {mapReduce: "view", map: function() {}, reduce: function() {}, out: "out"},
-        expectFailure: true
+    group: {
+        command: {group: {ns: "test.view", key: "x", $reduce: function() {}, initial: {}}},
+        skip: needsToFailWithViewsErrorCode
     },
-    "mapreduce.shardedfinish": {command: {"mapreduce.shardedfinish": 1}, skip: true},
-    // TODO: decide
-    mergeChunks:
-        {command: {mergeChunks: "view", bounds: [{x: 0}, {x: 10}]}, runOnDb: "admin", skip: true},
-    // TODO: decide
-    moveChunk: {command: {moveChunk: 1}, skip: true},
-    // TODO: errors because "namespace is a view, not a collection"
+    handshake: {skip: isUnrelated},
+    hostInfo: {skip: isUnrelated},
+    insert: {skip: "tested in views/views_disallowed_crud_commands.js"},
+    invalidateUserCache: {skip: isUnrelated},
+    isMaster: {skip: isUnrelated},
+    journalLatencyTest: {skip: isUnrelated},
+    killCursors: {
+        command: {killCursors: "views", cursors: [NumberLong(0)]},
+        skip: "TO DO: this should behave the same as getMore"
+    },
+    killOp: {skip: isUnrelated},
+    listCollections: {skip: "tested in views/views_creation.js"},
+    listCommands: {skip: isUnrelated},
+    listDatabases: {skip: isUnrelated},
+    listIndexes: {
+        command: {listIndexes: "view"},
+        expectFailure: true,
+        skip: "TO DO: either needs to fail with a views error code OR be a no-op"
+    },
+    lockInfo: {skip: isUnrelated},
+    logRotate: {skip: isUnrelated},
+    logout: {skip: isUnrelated},
+    makeSnapshot: {skip: isAnInternalCommand},
+    mapReduce: {skip: "tested in views/disallowed_crud_commands.js"},
+    "mapreduce.shardedfinish": {skip: isAnInternalCommand},
+    mergeChunks: {
+        command: {mergeChunks: "view", bounds: [{x: 0}, {x: 10}]},
+        runOnDb: "admin",
+        skip: needsToFailWithViewsErrorCode
+    },
+    moveChunk: {command: {moveChunk: 1}, skip: needsToFailWithViewsErrorCode},
     parallelCollectionScan: {command: {parallelCollectionScan: "view"}, expectFailure: true},
     ping: {command: {ping: 1}},
-    // TODO: all of the plan cache commands error because "namespace is a view, not a collection"
     planCacheClear: {command: {planCacheClear: "view"}, expectFailure: true},
     planCacheClearFilters: {command: {planCacheClearFilters: "view"}, expectFailure: true},
     planCacheListFilters: {command: {planCacheListFilters: "view"}, expectFailure: true},
     planCacheListPlans: {command: {planCacheListPlans: "view"}, expectFailure: true},
     planCacheListQueryShapes: {command: {planCacheListQueryShapes: "view"}, expectFailure: true},
     planCacheSetFilter: {command: {planCacheSetFilter: "view"}, expectFailure: true},
-    // -----
-    profile: {command: {profile: -1}},
-    // TODO: errors because "ns not found"
-    reIndex: {command: {reIndex: "view"}, expectFailure: true},
-    // TODO: errors because "source namespace does not exist (code 26)"
+    profile: {skip: isUnrelated},
+    reIndex: {
+        command: {reIndex: "view"},
+        expectFailure: true,
+        skip: "TO DO: either needs to fail with a views error code OR allow it with a no-op"
+    },
     renameCollection: {
         command: {renameCollection: "test.view", to: "test.otherview"},
         runOnDb: "admin",
-        expectFailure: true
+        expectFailure: true,
+        skip: "TO DO: it fails now but we need to support this"
     },
-    // Probably fine: fails with "namespace is a view, not a collection"
     repairCursor: {command: {repairCursor: "view"}, expectFailure: true},
     repairDatabase: {command: {repairDatabase: 1}},
-    // XXX: Skipping all repl commands
-    replSetElect: {command: {replSetElect: 1}, skip: true},
-    replSetFreeze: {command: {replSetFreeze: 1}, skip: true},
-    replSetFresh: {command: {replSetFresh: 1}, skip: true},
-    replSetGetConfig: {command: {replSetGetConfig: 1}, skip: true},
-    replSetGetRBID: {command: {replSetGetRBID: 1}, skip: true},
-    replSetGetStatus: {command: {replSetGetStatus: 1}, skip: true},
-    replSetHeartbeat: {command: {replSetHeartbeat: 1}, skip: true},
-    replSetInitiate: {command: {replSetInitiate: 1}, skip: true},
-    replSetMaintenance: {command: {replSetMaintenance: 1}, skip: true},
-    replSetReconfig: {command: {replSetReconfig: 1}, skip: true},
-    replSetRequestVotes: {command: {replSetRequestVotes: 1}, skip: true},
-    replSetStepDown: {command: {replSetStepDown: 1}, skip: true},
-    replSetSyncFrom: {command: {replSetSyncFrom: 1}, skip: true},
-    replSetTest: {skip: true},
-    replSetUpdatePosition: {command: {replSetUpdatePosition: 1}, skip: true},
-    // ---
-    resetError: {command: {resetError: 1}},
-    resync: {command: {resync: 1}, skip: true},
+    replSetElect: {skip: isAnInternalCommand},
+    replSetFreeze: {skip: isAnInternalCommand},
+    replSetFresh: {skip: isAnInternalCommand},
+    replSetGetConfig: {skip: isAnInternalCommand},
+    replSetGetRBID: {skip: isAnInternalCommand},
+    replSetGetStatus: {skip: isAnInternalCommand},
+    replSetHeartbeat: {skip: isAnInternalCommand},
+    replSetInitiate: {skip: isAnInternalCommand},
+    replSetMaintenance: {skip: isAnInternalCommand},
+    replSetReconfig: {skip: isAnInternalCommand},
+    replSetRequestVotes: {skip: isAnInternalCommand},
+    replSetStepDown: {skip: isAnInternalCommand},
+    replSetSyncFrom: {skip: isAnInternalCommand},
+    replSetTest: {skip: isAnInternalCommand},
+    replSetUpdatePosition: {skip: isAnInternalCommand},
+    resetError: {skip: isUnrelated},
+    resync: {skip: isUnrelated},
     revokePrivilegesFromRole: {
         command: {
             revokePrivilegesFromRole: "testrole",
@@ -237,45 +246,41 @@ var viewsCommandTests = {
             conn.runCommand({createRole: "testrole", privileges: [], roles: []});
         }
     },
-    revokeRolesFromRole: {command: {revokeRolesFromRole: 1}, skip: true},
-    revokeRolesFromUser: {command: {revokeRolesFromUser: 1}, skip: true},
+    revokeRolesFromRole: {skip: isUnrelated},
+    revokeRolesFromUser: {skip: isUnrelated},
     // Skipping because it needs a role
-    rolesInfo: {command: {rolesInfo: 1}, skip: true},
-    saslContinue: {command: {saslContinue: 1}, skip: true},
-    saslStart: {command: {saslStart: 1}, skip: true},
-    serverStatus: {command: {serverStatus: 1}},
-    setCommittedSnapshot: {skip: 1},
-    setParameter: {command: {setParameter: 1}, skip: true},
-    setShardVersion: {command: {setShardVersion: 1}, skip: true},
-    shardConnPoolStats: {command: {shardConnPoolStats: 1}},          // skippable
-    shardingState: {command: {shardingState: 1}, runOnDb: "admin"},  // skippable
-    shutdown: {skip: true},
-    sleep: {skip: true},
-    // TODO: Decide on sharding commands
-    splitChunk: {command: {splitChunk: 1}, expectFailure: true, skip: true},
-    splitVector: {command: {splitVector: 1}, expectFailure: true, skip: true},
-    stageDebug: {
-        command: {
-            stageDebug: "view",
-            plan: {
-                ixscan: {
-                    args: {
-                        keyPattern: {x: 1},
-                        startKey: {"": 20},
-                        endKey: {},
-                        endKeyInclusive: true,
-                        direction: -1
-                    }
-                }
-            }
-        },
-        expectFailure: true
+    rolesInfo: {skip: isUnrelated},
+    saslContinue: {skip: isUnrelated},
+    saslStart: {skip: isUnrelated},
+    serverStatus: {
+        command: {serverStatus: 1},
+        skip:
+            "TO DO: ensure that if there's collection-related stats in serverStatus, views show up as well (when applicable)"
     },
-    top: {command: {top: "view"}, runOnDb: "admin"},
-    touch: {command: {touch: "view", data: true}, expectFailure: true},
-    unsetSharding: {command: {unsetSharding: 1}, skip: true},
-    update:
-        {command: {update: "view", updates: [{q: {x: 1}, u: {$set: {x: 2}}}]}, expectFailure: true},
+    setCommittedSnapshot: {skip: isAnInternalCommand},
+    setParameter: {skip: isUnrelated},
+    setShardVersion: {skip: isUnrelated},
+    shardConnPoolStats: {skip: isUnrelated},
+    shardingState: {skip: isUnrelated},
+    shutdown: {skip: isUnrelated},
+    sleep: {skip: isUnrelated},
+    splitChunk:
+        {command: {splitChunk: 1}, expectFailure: true, skip: needsToFailWithViewsErrorCode},
+    splitVector:
+        {command: {splitVector: 1}, expectFailure: true, skip: needsToFailWithViewsErrorCode},
+    stageDebug: {skip: isAnInternalCommand},
+    top: {
+        command: {top: "view"},
+        runOnDb: "admin",
+        skip: "TO DO: need to check output for views stats"
+    },
+    touch: {
+        command: {touch: "view", data: true},
+        expectFailure: true,
+        skip: needsToFailWithViewsErrorCode
+    },
+    unsetSharding: {skip: isAnInternalCommand},
+    update: {skip: "tested in views/views_disallowed_crud_commands.js"},
     updateRole: {
         command: {
             updateRole: "testrole",
@@ -285,12 +290,13 @@ var viewsCommandTests = {
             conn.runCommand({createRole: "testrole", privileges: [], roles: []});
         }
     },
-    // TODO
-    updateUser: {command: {updateUser: 1}, skip: true},
-    usersInfo: {command: {usersInfo: 1}},
-    // TODO: This fails for now, but we want it to work
-    validate: {command: {validate: "view"}, expectFailure: true},
-    whatsmyuri: {command: {whatsmyuri: 1}}
+    updateUser: {skip: isUnrelated},
+    usersInfo: {skip: isUnrelated},
+    validate: {
+        command: {validate: "view"},
+        skip: "TO DO: we want validate on a view to validate the pipeline"
+    },
+    whatsmyuri: {skip: isUnrelated}
 };
 
 var viewsCommandUtils = {
