@@ -217,9 +217,11 @@ public:
              std::string& errmsg,
              BSONObjBuilder& result) final {
         try {
+            log() << "inWriteCommand run method " << dbname << cmdObj;
             runImpl(txn, dbname, cmdObj, result);
             return true;
         } catch (const DBException& ex) {
+            log() << "ERROR EOOR" << ex.getInfo();
             LastError::get(txn->getClient()).setLastError(ex.getCode(), ex.getInfo().msg);
             throw;
         }
@@ -260,6 +262,7 @@ public:
                  const BSONObj& cmdObj,
                  BSONObjBuilder& result) final {
 
+        log() << "In Cmd Insert " << cmdObj;
         // DOESN'T HIT THIS PATH...unless if it's not through a view
         // Try inserting a timeseries object here
         // catches writing straight to the collection
@@ -309,6 +312,8 @@ public:
                  const std::string& dbname,
                  const BSONObj& cmdObj,
                  BSONObjBuilder& result) final {
+        log() << "here is run impl" << cmdObj;
+
         const auto batch = parseUpdateCommand(dbname, cmdObj);
         const auto reply = performUpdates(txn, batch);
         serializeReply(

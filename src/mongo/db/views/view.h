@@ -117,7 +117,7 @@ private:
     std::string _dbName;
     std::string _viewName;  // The namespace of the view.
     std::string
-        _backingViewName;  // The namespace of the view/collection upon which the view is based.
+        _backingViewName;   // The namespace of the view/collection upon which the view is based.
     std::vector<BSONObj> _pipeline;
     bool _timeseries; // True if the view is a timeseries view
     TimeSeriesBatchManager *tsManager; // Exists if the timeseries exists

@@ -115,6 +115,31 @@ batchIdType TimeSeriesBatch::_thisBatchId() {
     return _batchId;
 }
 
+// /bool save(Database *db, Collection *coll) {
+//     // Step 1: Construct the txn
+
+//     // Step 2: Perform the save txn
+//     auto result = this->run(txn, db, cmd, 0, errmsg, inPlaceReplyBob);
+
+//     // Step 3: Construct the response
+//     appendCommandStatus(inPlaceReplyBob, result, errmsg);
+//     inPlaceReplyBob.doneFast();
+
+//     BSONObjBuilder metadataBob;
+//     appendOpTimeMetadata(txn, request, &metadataBob);
+//     replyBuilder->setMetadata(metadataBob.done());
+
+//     return result;
+
+//     std::string toNs = db->name() + "." + shortTo;
+//     Collection* toCollection = db->getCollection(toNs);
+//     const NamespaceString& collectionName
+//     AutoGetDb autoDb(txn, collectionName.db(), MODE_X);
+//     Database* db = autoDb.getDb();
+//     Collection* collection = db->getCollection(collectionName);
+
+// }
+
 void TimeSeriesBatchManager::insert(const BSONObj& doc) {
 	Date_t date = doc.getField("_id").Date();
 

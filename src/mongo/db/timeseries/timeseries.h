@@ -33,6 +33,7 @@
 #include "mongo/db/jsobj.h"
 #include "mongo/util/time_support.h"
 #include "mongo/util/assert_util.h"
+#include "mongo/base/status.h"
 
 #include <string>
 #include <assert.h>
@@ -99,8 +100,8 @@ public:
     /* Reports this batch's batch Id */
     batchIdType _thisBatchId();
 
-    /* Flushes to disk, probably */
-    // void save();
+    // /* Saves to a collection */
+    // Status save(Collection coll);
 
     /* Assuming this is the deconstructor. Saves the contents of the buffer
      * (on disk?) and disappears */
@@ -139,6 +140,9 @@ public:
     void remove(const Date_t& time);
 
     void removeBatch(const Date_t& time);
+
+    // When trying to get rid of TS Manager, save everything to the collection
+    // ~TimeSeriesBatchManager();
 
 private:
     /* Converts a date to the corresponding batch id number */
