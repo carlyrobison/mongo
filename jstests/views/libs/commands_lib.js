@@ -76,8 +76,24 @@ var viewsCommandTests = {
         command: {createIndexes: "view", indexes: [{key: {x: 1}, name: "x_1"}]},
         expectFailure: true
     },
-    createRole: {command: {createRole: "testrole", privileges: [], roles: []}},
-    createUser: {command: {createUser: "testuser", pwd: "testpass", roles: []}},
+    createRole: {
+        command: {createRole: "testrole", privileges: [], roles: []},
+        setup: function(conn) {
+            conn.runCommand({dropAllRolesFromDatabase: 1});
+        },
+        teardown: function(conn) {
+            conn.runCommand({dropAllRolesFromDatabase: 1});
+        }
+    },
+    createUser: {
+        command: {createUser: "testuser", pwd: "testpass", roles: []},
+        setup: function(conn) {
+            conn.runCommand({dropAllUsersFromDatabase: 1});
+        },
+        teardown: function(conn) {
+            conn.runCommand({dropAllUsersFromDatabase: 1});
+        }
+    },
     currentOp: {skip: isUnrelated},
     currentOpCtx: {skip: isUnrelated},
     dataSize: {
@@ -108,6 +124,9 @@ var viewsCommandTests = {
         command: {dropRole: "testrole"},
         setup: function(conn) {
             conn.runCommand({createRole: "testrole", privileges: [], roles: []});
+        },
+        teardown: function(conn) {
+            conn.runCommand({dropAllRolesFromDatabase: 1});
         }
     },
     dropUser: {skip: isUnrelated},
@@ -151,18 +170,27 @@ var viewsCommandTests = {
         },
         setup: function(conn) {
             conn.runCommand({createRole: "testrole", privileges: [], roles: []});
+        },
+        teardown: function(conn) {
+            conn.runCommand({dropAllRolesFromDatabase: 1});
         }
     },
     grantRolesToRole: {
         command: {grantRolesToRole: "testrole", roles: ["read"]},
         setup: function(conn) {
             conn.runCommand({createRole: "testrole", privileges: [], roles: []});
+        },
+        teardown: function(conn) {
+            conn.runCommand({dropAllRolesFromDatabase: 1});
         }
     },
     grantRolesToUser: {
         command: {grantRolesToUser: "testuser", roles: ["read"]},
         setup: function(conn) {
             conn.runCommand({createUser: "testuser", pwd: "testpass", roles: []});
+        },
+        teardown: function(conn) {
+            conn.runCommand({dropAllUsersFromDatabase: 1});
         },
         skip: "TO DO: need a more sophisticated authentication test for views"
     },
@@ -247,6 +275,9 @@ var viewsCommandTests = {
         },
         setup: function(conn) {
             conn.runCommand({createRole: "testrole", privileges: [], roles: []});
+        },
+        teardown: function(conn) {
+            conn.runCommand({dropAllRolesFromDatabase: 1});
         }
     },
     revokeRolesFromRole: {skip: isUnrelated},
@@ -291,6 +322,9 @@ var viewsCommandTests = {
         },
         setup: function(conn) {
             conn.runCommand({createRole: "testrole", privileges: [], roles: []});
+        },
+        teardown: function(conn) {
+            conn.runCommand({dropAllRolesFromDatabase: 1});
         }
     },
     updateUser: {skip: isUnrelated},
@@ -308,7 +342,6 @@ var viewsCommandUtils = {
         assert.commandWorked(conn.runCommand({create: "view", viewOn: "collection"}));
         assert.writeOK(conn.collection.insert({x: 1}));
     },
-
 };
 
 /**
