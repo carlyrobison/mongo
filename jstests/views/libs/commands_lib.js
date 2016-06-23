@@ -33,7 +33,11 @@ var viewsCommandTests = {
     _transferMods: {skip: isAnInternalCommand},
     aggregate: {skip: "tested in views/views_aggregation.js"},
     appendOplogNote: {skip: isUnrelated},
-    applyOps: {command: {applyOps: [{op: "i", o: {_id: 1}, ns: "test.view"}]}, expectFailure: true, skip: needsToFailWithViewsErrorCode},
+    applyOps: {
+        command: {applyOps: [{op: "i", o: {_id: 1}, ns: "test.view"}]},
+        expectFailure: true,
+        skip: needsToFailWithViewsErrorCode
+    },
     authSchemaUpgrade: {skip: isUnrelated},
     authenticate: {skip: isUnrelated},
     availableQueryOptions: {skip: isUnrelated},
@@ -79,7 +83,6 @@ var viewsCommandTests = {
     dataSize: {
         command: {dataSize: "test.view"},
         expectFailure: true,
-        skip: needsToFailWithViewsErrorCode
     },
     dbHash: {
         command: {dbHash: 1},
