@@ -3,14 +3,23 @@
 Import("env")
 
 env.Library(
-    target='view',
+    target='view_mongod',
     source=[
-        'view.cpp',
         'view_catalog.cpp',
-        'view_transform.cpp',
+        'view_sharding_check.cpp',
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/base',
-        '$BUILD_DIR/mongo/db/pipeline/pipeline'
+        'view_shared',
+    ]
+)
+
+env.Library(
+    target='view_shared',
+    source=[
+        'view.cpp',
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/base',
     ]
 )

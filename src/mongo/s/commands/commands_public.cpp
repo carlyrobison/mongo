@@ -42,6 +42,8 @@
 #include "mongo/db/commands/copydb.h"
 #include "mongo/db/commands/rename_collection.h"
 #include "mongo/db/lasterror.h"
+#include "mongo/db/matcher/extensions_callback_noop.h"
+#include "mongo/db/query/parsed_distinct.h"
 #include "mongo/executor/task_executor_pool.h"
 #include "mongo/rpc/get_status_from_command_result.h"
 #include "mongo/s/catalog/catalog_cache.h"
@@ -56,6 +58,7 @@
 #include "mongo/s/commands/sharded_command_processing.h"
 #include "mongo/s/config.h"
 #include "mongo/s/grid.h"
+#include "mongo/s/query/cluster_view_util.h"
 #include "mongo/s/query/store_possible_cursor.h"
 #include "mongo/s/sharding_raii.h"
 #include "mongo/s/stale_exception.h"
@@ -184,6 +187,11 @@ private:
         BSONObj res;
         bool ok = conn->runCommand(db, cmdObj, res, passOptions() ? options : 0);
         conn.done();
+
+        auto status = getStatusFromCommandResult(res);
+        if (ErrorCodes::ViewMustRunOnMongos == status && res.hasField("resolvedView")) {
+            ClusterViewDecoration::setResolvedView(txn, res.getObjectField("resolvedView"));
+        }
 
         // First append the properly constructed writeConcernError. It will then be skipped
         // in appendElementsUnique.
@@ -1100,12 +1108,74 @@ public:
         return false;
     }
 
+    StatusWith<BSONObj> convertViewToAgg(OperationContext* txn,
+                                         StringData resolvedViewNs,
+                                         const std::vector<BSONElement>& resolvedViewPipeline,
+                                         const BSONObj& cmdObj,
+                                         bool isExplain) {
+        NamespaceString nss(resolvedViewNs);
+
+        auto parsedDistinct = ParsedDistinct::parse(txn, nss, cmdObj, ExtensionsCallbackNoop(), false);
+        if (!parsedDistinct.isOK()) {
+            return parsedDistinct.getStatus();
+        }
+
+        auto qr = &parsedDistinct.getValue().getQuery()->getQueryRequest();
+    
+        Status viewValidationStatus = qr->validateForView();
+        if (!viewValidationStatus.isOK()) {
+            return viewValidationStatus;
+        }
+
+        return qr->asExpandedViewAggregation("distinct", resolvedViewPipeline);
+    }
+
     bool run(OperationContext* txn,
              const string& dbName,
              BSONObj& cmdObj,
              int options,
              string& errmsg,
              BSONObjBuilder& result) {
+
+        auto ok = runExec(txn, dbName, cmdObj, options, errmsg, result);
+
+        if (!ok) {
+            BSONObj tmp = result.asTempObj();
+            if (tmp.hasField("code")) {
+                auto codeElement = tmp.getField("code");
+                auto code = codeElement.Int();
+
+                if (code == ErrorCodes::ViewMustRunOnMongos) {
+                    auto viewDef = ClusterViewDecoration::getResolvedView(txn);
+                    invariant(!viewDef.isEmpty());
+
+                    StatusWith<BSONObj> match = convertViewToAgg(txn,
+                                                     viewDef["ns"].valueStringData(),
+                                                     viewDef["pipeline"].Array(),
+                                                     cmdObj,
+                                                     false);
+                    if (match.isOK()) {
+                        result.resetToEmpty();
+
+                        Command* c = Command::findCommand("aggregate");
+                        bool retval = c->run(txn, dbName, match.getValue(), options, errmsg, result);
+                        return retval;
+                    }
+
+                    return appendCommandStatus(result, match.getStatus());
+                }
+            }
+        }
+
+        return ok;
+    }
+
+    bool runExec(OperationContext* txn,
+                 const string& dbName,
+                 BSONObj& cmdObj,
+                 int options,
+                 string& errmsg,
+                 BSONObjBuilder& result) {
         const string fullns = parseNs(dbName, cmdObj);
 
         auto status = grid.catalogCache()->getDatabase(txn, dbName);

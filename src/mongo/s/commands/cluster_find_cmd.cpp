@@ -36,10 +36,9 @@
 #include "mongo/db/matcher/extensions_callback_noop.h"
 #include "mongo/db/query/cursor_response.h"
 #include "mongo/db/stats/counters.h"
-#include "mongo/db/views/view_transform.h"
 #include "mongo/s/commands/strategy.h"
 #include "mongo/s/query/cluster_find.h"
-#include "mongo/s/query/view_util.h"
+#include "mongo/s/query/cluster_view_util.h"
 
 namespace mongo {
 namespace {
@@ -124,6 +123,35 @@ public:
             txn, cmdObj, *qr.getValue(), verbosity, serverSelectionMetadata, out);
     }
 
+    StatusWith<BSONObj> convertViewToAgg(OperationContext* txn,
+                                         StringData resolvedViewNs,
+                                         const std::vector<BSONElement>& resolvedViewPipeline,
+                                         const BSONObj& cmdObj,
+                                         bool isExplain) {
+        NamespaceString nss(resolvedViewNs);
+
+        auto qrStatus = QueryRequest::makeFromFindCommand(nss, cmdObj, isExplain);
+        if (!qrStatus.isOK()) {
+            return qrStatus.getStatus();
+        }
+
+        auto& qr = qrStatus.getValue();
+
+        auto statusWithCQ = CanonicalQuery::canonicalize(txn, std::move(qr), ExtensionsCallbackNoop());
+        if (!statusWithCQ.isOK()) {
+            return statusWithCQ.getStatus();
+        }
+        std::unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
+
+        auto& queryRequest = cq->getQueryRequest();
+        Status viewValidationStatus = queryRequest.validateForView();
+        if (!viewValidationStatus.isOK()) {
+            return viewValidationStatus;
+        }
+
+        return queryRequest.asExpandedViewAggregation("", resolvedViewPipeline);
+    }
+
     bool run(OperationContext* txn,
              const std::string& dbname,
              BSONObj& cmdObj,
@@ -140,23 +168,23 @@ public:
                 auto code = codeElement.Int();
 
                 if (code == ErrorCodes::ViewMustRunOnMongos) {
-                    auto viewDef = ClusterViewUtil::getResolvedView(txn);
+                    auto viewDef = ClusterViewDecoration::getResolvedView(txn);
                     invariant(!viewDef.isEmpty());
 
-                    BSONObj match = ViewTransform::findToViewAggregation(
-                        viewDef["ns"].str(), viewDef["pipeline"].Array(), cmdObj, false);
-                    if (!match.isEmpty()) {
+                    auto match = convertViewToAgg(txn,
+                                                  viewDef["ns"].valueStringData(),
+                                                  viewDef["pipeline"].Array(),
+                                                  cmdObj,
+                                                  false);
+                    if (match.isOK()) {
                         result.resetToEmpty();
-                        // TODO: Do we need to bypass auth? Looks like we are past auth?
                         Command* c = Command::findCommand("aggregate");
-                        bool retval = c->run(txn, dbname, match, options, errmsg, result);
+                        bool retval =
+                            c->run(txn, dbname, match.getValue(), options, errmsg, result);
                         return retval;
                     }
 
-                    return appendCommandStatus(
-                        result,
-                        {ErrorCodes::OptionNotSupportedOnView,
-                         str::stream() << "One or more option not supported on views."});
+                    return appendCommandStatus(result, match.getStatus());
                 }
             }
         }

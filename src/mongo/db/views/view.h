@@ -37,7 +37,6 @@
 #include "mongo/base/string_data.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/operation_context.h"
-#include "mongo/db/pipeline/pipeline.h"
 #include "mongo/util/mongoutils/str.h"
 
 namespace mongo {
@@ -85,9 +84,9 @@ public:
 
     void changePipeline(const BSONObj& pipeline);
 
-    static BSONObj getAggregateCommand(std::string rootNs,
-                                       BSONObj& cmd,
-                                       std::vector<BSONObj> pipeline);
+    static BSONObj pipelineToViewAggregation(const std::string resolvedViewNs,
+                                             const std::vector<BSONObj>& resolvedViewPipeline,
+                                             const BSONObj& cmdObj);
 
     // Just for debugging right now
     std::string toString() {

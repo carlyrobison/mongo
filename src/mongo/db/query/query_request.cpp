@@ -926,10 +926,19 @@ boost::optional<long long> QueryRequest::getEffectiveBatchSize() const {
 }
 
 // Views related functions
-void QueryRequest::asAggregationCommand(BSONObjBuilder* b, StringData cmd) const {
+void QueryRequest::asAggregationCommand(
+    BSONObjBuilder* b,
+    StringData cmd,
+    const std::vector<BSONElement>* pipelineStagesToPrepend) const {
     b->append("aggregate", _nss.coll());
 
     BSONArrayBuilder pipeline;
+
+    if (pipelineStagesToPrepend) {
+        for (auto&& item : *pipelineStagesToPrepend) {
+            pipeline.append(item);
+        }
+    }
 
     if (!_filter.isEmpty()) {
         pipeline.append(BSON("$match" << _filter));
@@ -991,6 +1000,14 @@ BSONObj QueryRequest::asAggregationCommand(StringData cmd) const {
 BSONObj QueryRequest::asAggregationCommand() const {
     BSONObjBuilder b;
     asAggregationCommand(&b, "");
+    return b.obj();
+}
+
+BSONObj QueryRequest::asExpandedViewAggregation(
+    StringData cmd,
+    const std::vector<BSONElement>& resolvedViewPipeline) const {
+    BSONObjBuilder b;
+    asAggregationCommand(&b, cmd, &resolvedViewPipeline);
     return b.obj();
 }
 

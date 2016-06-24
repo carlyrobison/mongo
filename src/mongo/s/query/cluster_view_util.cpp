@@ -28,7 +28,7 @@
 
 #include "mongo/platform/basic.h"
 
-#include "mongo/s/query/view_util.h"
+#include "mongo/s/query/cluster_view_util.h"
 
 #include "mongo/db/operation_context.h"
 #include "mongo/util/decorable.h"
@@ -41,11 +41,11 @@ const auto resolvedViewDecoration = OperationContext::declareDecoration<BSONObj>
 
 }  // namespace
 
-BSONObj ClusterViewUtil::getResolvedView(OperationContext* txn) {
+BSONObj ClusterViewDecoration::getResolvedView(OperationContext* txn) {
     return resolvedViewDecoration(txn);
 }
 
-void ClusterViewUtil::setResolvedView(OperationContext* txn, BSONObj resolvedView) {
+void ClusterViewDecoration::setResolvedView(OperationContext* txn, BSONObj resolvedView) {
     resolvedViewDecoration(txn) = resolvedView;
 }
 

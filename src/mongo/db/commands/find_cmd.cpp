@@ -52,6 +52,7 @@
 #include "mongo/db/server_parameters.h"
 #include "mongo/db/service_context.h"
 #include "mongo/db/stats/counters.h"
+#include "mongo/db/views/view_sharding_check.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -157,7 +158,17 @@ public:
         // an execution tree with an EOFStage.
         Collection* collection = ctx.getCollection();
         /* Check if this is running on a view */
-        if (ctx.getView()) {
+        if (auto view = ctx.getView()) {
+            ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
+            if (!viewShardingCheck.canRunOnMongod()) {
+                viewShardingCheck.appendResolvedView(*out);
+
+                Status status({ErrorCodes::ViewMustRunOnMongos,
+                               str::stream() << "Command on view must be executed by mongos"});
+                appendCommandStatus(*out, status);
+                return status;
+            }
+
             ctx.unlock();
             auto& qr = cq->getQueryRequest();
             Status viewValidationStatus = qr.validateForView();
@@ -265,7 +276,18 @@ public:
         AutoGetCollectionOrViewForRead ctx(txn, nss);
         Collection* collection = ctx.getCollection();
         // Check if this query is being performed on a view.
-        if (ctx.getView()) {
+        if (auto view = ctx.getView()) {
+
+            ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
+            if (!viewShardingCheck.canRunOnMongod()) {
+                viewShardingCheck.appendResolvedView(result);
+
+                return appendCommandStatus(
+                    result,
+                    {ErrorCodes::ViewMustRunOnMongos,
+                     str::stream() << "Command on view must be executed by mongos"});
+            }
+
             ctx.unlock();
             auto& qr = cq->getQueryRequest();
             Status viewValidationStatus = qr.validateForView();

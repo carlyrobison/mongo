@@ -400,9 +400,14 @@ public:
     /**
      * Converts this QR into a corresponding $match aggregation
      */
-    void asAggregationCommand(BSONObjBuilder* b, StringData cmd) const;
     BSONObj asAggregationCommand() const;
     BSONObj asAggregationCommand(StringData cmd) const;
+    void asAggregationCommand(
+        BSONObjBuilder* b,
+        StringData cmd,
+        const std::vector<BSONElement>* pipelineStagesToPrepend = nullptr) const;
+    BSONObj asExpandedViewAggregation(StringData cmd,
+                                      const std::vector<BSONElement>& resolvedViewPipeline) const;
 
     Status validateForView() const;
 

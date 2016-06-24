@@ -41,7 +41,7 @@
 #include "mongo/rpc/metadata/server_selection_metadata.h"
 #include "mongo/s/client/shard_registry.h"
 #include "mongo/s/grid.h"
-#include "mongo/s/query/view_util.h"
+#include "mongo/s/query/cluster_view_util.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
 #include "mongo/util/scopeguard.h"
@@ -385,7 +385,7 @@ void AsyncResultsMerger::preserveViewDefinitionIfAny(OperationContext* txn,
     if (responseObj.hasField("code")) {
         auto code = responseObj.getField("code").Int();
         if (code == ErrorCodes::ViewMustRunOnMongos && responseObj.hasField("resolvedView")) {
-            ClusterViewUtil::setResolvedView(txn, responseObj.getObjectField("resolvedView"));
+            ClusterViewDecoration::setResolvedView(txn, responseObj.getObjectField("resolvedView"));
         }
     }
 }

@@ -31,9 +31,12 @@
 #include <memory>
 #include <string>
 
+#include "mongo/bson/util/bson_extract.h"
 #include "mongo/db/query/canonical_query.h"
 
 namespace mongo {
+
+class ExtensionsCallback;
 
 /**
  * The parsed form of the distinct command request.
@@ -57,6 +60,65 @@ public:
 
     const std::string& getKey() const {
         return _key;
+    }
+
+    static StatusWith<ParsedDistinct> parse(OperationContext* txn,
+                                     const NamespaceString& nss,
+                                     const BSONObj& cmdObj,
+                                     const ExtensionsCallback& extensionsCallback,
+                                     bool isExplain) {
+        const char kKeyField[] = "key";
+        const char kQueryField[] = "query";
+        const char kCollationField[] = "collation";
+
+        // Extract the key field.
+        BSONElement keyElt;
+        auto statusKey = bsonExtractTypedField(cmdObj, kKeyField, BSONType::String, &keyElt);
+        if (!statusKey.isOK()) {
+            return {statusKey};
+        }
+        auto key = keyElt.valuestrsafe();
+
+        auto qr = stdx::make_unique<QueryRequest>(nss);
+
+        // Extract the query field. If the query field is nonexistent, an empty query is used.
+        if (BSONElement queryElt = cmdObj[kQueryField]) {
+            if (queryElt.type() == BSONType::Object) {
+                qr->setFilter(queryElt.embeddedObject());
+            } else if (queryElt.type() != BSONType::jstNULL) {
+                return Status(ErrorCodes::TypeMismatch,
+                              str::stream() << "\"" << kQueryField
+                                            << "\" had the wrong type. Expected "
+                                            << typeName(BSONType::Object)
+                                            << " or "
+                                            << typeName(BSONType::jstNULL)
+                                            << ", found "
+                                            << typeName(queryElt.type()));
+            }
+        }
+
+        // Extract the collation field, if it exists.
+        if (BSONElement collationElt = cmdObj[kCollationField]) {
+            if (collationElt.type() != BSONType::Object) {
+                return Status(ErrorCodes::TypeMismatch,
+                              str::stream() << "\"" << kCollationField
+                                            << "\" had the wrong type. Expected "
+                                            << typeName(BSONType::Object)
+                                            << ", found "
+                                            << typeName(collationElt.type()));
+            }
+            qr->setCollation(collationElt.embeddedObject());
+        }
+
+        qr->setExplain(isExplain);
+        qr->setKey(key);
+
+        auto cq = CanonicalQuery::canonicalize(txn, std::move(qr), extensionsCallback);
+        if (!cq.isOK()) {
+            return cq.getStatus();
+        }
+
+        return ParsedDistinct(std::move(cq.getValue()), std::move(key));
     }
 
 private:

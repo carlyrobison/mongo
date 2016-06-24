@@ -32,29 +32,13 @@
 
 namespace mongo {
 
-// TODO: Can we make 'command supports view', validation and transform part of the command
-// interface?
+class OperationContext;
 
-class ViewTransform {
+class ClusterViewDecoration {
 public:
-    // TODO - should return StatusWith to allow for error reporting
-    static BSONObj findToViewAggregation(const BSONObj& cmdObj, bool hasExplain);
-    static BSONObj findToViewAggregation(const std::string resolvedViewNs,
-                                         const std::vector<BSONElement>& resolvedViewPipeline,
-                                         const BSONObj& cmdObj,
-                                         bool hasExplain);
+    static BSONObj getResolvedView(OperationContext* txn);
 
-    static BSONObj pipelineToViewAggregation(const std::string resolvedViewNs,
-                                             const std::vector<BSONObj>& resolvedViewPipeline,
-                                             const BSONObj& cmdObj);
-
-    static BSONObj countToViewAggregation(const BSONObj& cmdObj, bool hasExplain);
-    static BSONObj countToViewAggregation(const BSONObj& resolvedView,
-                                          const BSONObj& cmdObj,
-                                          bool hasExplain);
-
-private:
-    static bool isValidOnView(const BSONObj& cmdObj);
+    static void setResolvedView(OperationContext* txn, BSONObj resolvedView);
 };
 
 }  // namespace mongo

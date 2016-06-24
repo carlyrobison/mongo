@@ -12,7 +12,7 @@ env.Library(
         '$BUILD_DIR/mongo/db/query/query_common',
         "cluster_client_cursor",
         "cluster_cursor_cleanup_job",
-        'cluster_views',
+        "cluster_views",
         "store_possible_cursor",
     ],
 )
@@ -74,7 +74,7 @@ env.Library(
 env.Library(
     target="cluster_views",
     source=[
-        "view_util.cpp",
+        "cluster_view_util.cpp",
     ],
     LIBDEPS=[
         '$BUILD_DIR/mongo/util/decorable',
