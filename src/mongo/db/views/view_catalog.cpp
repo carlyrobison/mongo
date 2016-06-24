@@ -145,7 +145,7 @@ std::tuple<std::string, std::vector<BSONObj>> ViewCatalog::resolveView(Operation
         backingNs = view->fullViewOnNs();
 
         std::vector<BSONObj> oldPipeline = view->pipeline();
-        newPipeline.insert(newPipeline.end(), oldPipeline.begin(), oldPipeline.end());
+        newPipeline.insert(newPipeline.begin(), oldPipeline.begin(), oldPipeline.end());
     }
 
     uasserted(ErrorCodes::ViewRecursionLimitExceeded, "view depth too deep or view cycle detected");
