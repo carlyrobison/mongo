@@ -287,43 +287,44 @@ public:
 
             // Check if this is a time series
             // log() << cmdObj;
-            if (cmdObj.getStringField("find") == std::string("timeseriesview")) {
-                                // log() << "Detected time series view find request";
+            // if (view->isTimeSeries()) {
+            //     // log() << "Detected time series view find request";
 
-                // Extract the _id value, and find with that.
-                BSONObj findQuery = cmdObj.getField("filter").Obj();
-                // log() << findQuery;
+            //     // Extract the _id value, and find with that.
+            //     BSONObj findQuery = cmdObj.getField("filter").Obj();
+            //     // log() << findQuery;
 
-                // This is wrong when we just want to find() all of the timeseries data.
-                // Unless we don't want to support that.
-                // Actually this will be obsolete when we work with a collection.
+            //     // This is wrong when we just want to find() all of the timeseries data.
+            //     // Unless we don't want to support that.
+            //     // Actually this will be obsolete when we work with a collection.
 
-                uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by _id.",
-                    findQuery.hasField("_id"));
-                uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by a date.",
-                    findQuery.getField("_id").type() == mongo::Date);
+            //     uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by _id.",
+            //         findQuery.hasField("_id"));
+            //     uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by a date.",
+            //         findQuery.getField("_id").type() == mongo::Date);
 
-                //log() << "Searching for time " << findQuery.getField("_id").Date();
+            //     //log() << "Searching for time " << findQuery.getField("_id").Date();
                 
-                BSONObj obj = view->getTSManager()->retrieve(findQuery.getField("_id").Date());
-                
-                // return the object
-                //log() << "Retrieved " << obj;
-                //log() << "Search completed. ";
+            //     BSONObj obj = view->getTSManager()->retrieve(findQuery.getField("_id").Date());
 
-                /**
-                 * Collection world:
-                 * If the find command has a timestamp _id, then we add a $match on the batch
-                 * id to the beginning of the aggregation pipeline. (unsure how to implement)
-                 * Otherwise we just let views do its thing.
-                 */
 
-                // Generate the response object to send to the client.
-                CursorResponseBuilder firstBatch(true, &result);
-                firstBatch.append(obj);
-                CursorId cursorId = 0;
-                firstBatch.done(cursorId, nss.ns());
-                return true;
+                // // return the object
+                // //log() << "Retrieved " << obj;
+                // //log() << "Search completed. ";
+
+                // *
+                //  * Collection world:
+                //  * If the find command has a timestamp _id, then we add a $match on the batch
+                //  * id to the beginning of the aggregation pipeline. (unsure how to implement)
+                //  * Otherwise we just let views do its thing.
+                 
+
+                // // Generate the response object to send to the client.
+                // CursorResponseBuilder firstBatch(true, &result);
+                // firstBatch.append(obj);
+                // CursorId cursorId = 0;
+                // firstBatch.done(cursorId, nss.ns());
+                // return true;
 
             else {
                 ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
