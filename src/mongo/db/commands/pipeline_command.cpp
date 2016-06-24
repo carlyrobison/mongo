@@ -58,6 +58,7 @@
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/db/views/view.h"
 #include "mongo/db/views/view_catalog.h"
+#include "mongo/db/views/view_sharding_check.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/log.h"
 
@@ -255,11 +256,23 @@ public:
             Collection* collection = ctx.getCollection();
 
             // If this is a view, resolve it.
-            if (ctx.getView()) {
+            if (auto view = ctx.getView()) {
+                ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
+                if (!viewShardingCheck.canRunOnMongod()) {
+                    viewShardingCheck.appendResolvedView(result);
+
+                    return appendCommandStatus(
+                        result,
+                        {ErrorCodes::ViewMustRunOnMongos,
+                         str::stream() << "Command on view must be executed by mongos"});
+                }
+
                 auto newAggregation = ctx.getDb()->getViewCatalog()->resolveView(txn, ns);
                 std::string rootNs = std::get<0>(newAggregation);
                 std::vector<BSONObj> viewPipeline = std::get<1>(newAggregation);
-                BSONObj viewCmd = ViewDefinition::getAggregateCommand(rootNs, cmdObj, viewPipeline);
+                // TODO: Use AggregationRequest object for transformation when available.
+                BSONObj viewCmd =
+                    ViewDefinition::pipelineToViewAggregation(rootNs, viewPipeline, cmdObj);
 
                 LOG(2) << "VIEWS: Final pipeline: " << viewCmd.jsonString();
                 ctx.unlock();

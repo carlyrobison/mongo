@@ -42,6 +42,7 @@
 #include "mongo/db/range_preserver.h"
 #include "mongo/db/repl/replication_coordinator_global.h"
 #include "mongo/db/views/view_catalog.h"
+#include "mongo/db/views/view_sharding_check.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -109,7 +110,17 @@ public:
         Collection* collection = ctx.getCollection();
 
         // Are we counting on a view?
-        if (ctx.getView()) {
+        if (auto view = ctx.getView()) {
+            ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
+            if (!viewShardingCheck.canRunOnMongod()) {
+                viewShardingCheck.appendResolvedView(*out);
+
+                Status status({ErrorCodes::ViewMustRunOnMongos,
+                               str::stream() << "Command on view must be executed by mongos"});
+                appendCommandStatus(*out, status);
+                return status;
+            }
+
             ctx.unlock();
 
             auto query = qr.get();
@@ -171,7 +182,17 @@ public:
         Collection* collection = ctx.getCollection();
 
         // Are we counting on a view?
-        if (ctx.getView()) {
+        if (auto view = ctx.getView()) {
+            ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
+            if (!viewShardingCheck.canRunOnMongod()) {
+                viewShardingCheck.appendResolvedView(result);
+
+                return appendCommandStatus(
+                    result,
+                    {ErrorCodes::ViewMustRunOnMongos,
+                     str::stream() << "Command on view must be executed by mongos"});
+            }
+
             ctx.unlock();
             auto query = qr.get();
             Status viewValidationStatus = query->validateForView();

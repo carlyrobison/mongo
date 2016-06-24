@@ -42,7 +42,7 @@
 #include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/expression_context.h"
 #include "mongo/db/pipeline/pipeline.h"
-#include "mongo/db/views/view_transform.h"
+#include "mongo/db/views/view.h"
 #include "mongo/executor/task_executor_pool.h"
 #include "mongo/platform/random.h"
 #include "mongo/rpc/get_status_from_command_result.h"
@@ -54,8 +54,8 @@
 #include "mongo/s/commands/sharded_command_processing.h"
 #include "mongo/s/config.h"
 #include "mongo/s/grid.h"
+#include "mongo/s/query/cluster_view_util.h"
 #include "mongo/s/query/store_possible_cursor.h"
-#include "mongo/s/query/view_util.h"
 #include "mongo/s/stale_exception.h"
 #include "mongo/util/log.h"
 
@@ -114,17 +114,15 @@ public:
                 auto code = tmp.getField("code").Int();
 
                 if (code == ErrorCodes::ViewMustRunOnMongos) {
-                    auto viewDef = ClusterViewUtil::getResolvedView(txn);
+                    auto viewDef = ClusterViewDecoration::getResolvedView(txn);
                     invariant(!viewDef.isEmpty());
 
                     std::vector<BSONObj> pipeline;
                     for (auto&& item : viewDef["pipeline"].Array()) {
-                        // TODO: getOwned here prevents invalid memory access. Fix with viewDef
-                        // split.
                         pipeline.push_back(item.Obj().getOwned());
                     }
 
-                    BSONObj match = ViewTransform::pipelineToViewAggregation(
+                    BSONObj match = ViewDefinition::pipelineToViewAggregation(
                         viewDef["ns"].str(), pipeline, cmdObj);
 
                     if (!match.isEmpty()) {
@@ -461,9 +459,8 @@ BSONObj PipelineCommand::aggRunCommand(
         throw RecvStaleConfigException("command failed because of stale config", result);
     }
 
-    // TODO: We can probably skip hasField check.
     if (ErrorCodes::ViewMustRunOnMongos == status && result.hasField("resolvedView")) {
-        ClusterViewUtil::setResolvedView(txn, result.getObjectField("resolvedView"));
+        ClusterViewDecoration::setResolvedView(txn, result.getObjectField("resolvedView"));
     }
 
     auto executorPool = grid.getExecutorPool();

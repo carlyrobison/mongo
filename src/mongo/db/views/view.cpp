@@ -69,26 +69,33 @@ void ViewDefinition::changePipeline(const BSONObj& pipeline) {
     }
 }
 
-BSONObj ViewDefinition::getAggregateCommand(std::string rootNs,
-                                            BSONObj& cmd,
-                                            std::vector<BSONObj> pipeline) {
+BSONObj ViewDefinition::pipelineToViewAggregation(const std::string resolvedViewNs,
+                                                 const std::vector<BSONObj>& resolvedViewPipeline,
+                                                 const BSONObj& cmdObj) {
     BSONObjBuilder b;
-    for (BSONElement e : cmd) {
+    std::vector<BSONObj> pipeline;
+    auto colName = NamespaceString(resolvedViewNs).coll();
+
+    for (auto&& item : resolvedViewPipeline) {
+        pipeline.push_back(item);
+    }
+
+    for (BSONElement e : cmdObj) {
         StringData fieldName = e.fieldNameStringData();
         if (fieldName == "pipeline") {
             BSONObj p = e.embeddedObject();
             for (BSONElement el : p) {
-                pipeline.push_back(el.Obj());
+                pipeline.push_back(el.Obj().getOwned());
             }
+
             b.append("pipeline", pipeline);
         } else if (fieldName == "aggregate") {
-            size_t dotPos = rootNs.find('.');
-            std::string collection = rootNs.substr(dotPos + 1);
-            b.append("aggregate", collection);
+            b.append("aggregate", colName);
         } else {
             b.append(e);
         }
     }
+
     return b.obj();
 }
 

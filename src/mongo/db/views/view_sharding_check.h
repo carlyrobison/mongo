@@ -29,16 +29,36 @@
 #pragma once
 
 #include "mongo/bson/bsonobj.h"
+#include "mongo/bson/bsonobjbuilder.h"
+
+#include <string>
+#include <vector>
 
 namespace mongo {
 
+class Database;
+class NamespaceString;
 class OperationContext;
+class ViewDefinition;
 
-class ClusterViewUtil {
+class ViewShardingCheck {
 public:
-    static BSONObj getResolvedView(OperationContext* txn);
+    ViewShardingCheck(OperationContext* opCtx, const Database* db, const ViewDefinition* view);
 
-    static void setResolvedView(OperationContext* txn, BSONObj resolvedView);
+    // When a read against a view is fowarded from mongoS, it is done so without any awareness as
+    // to whether the underlying collection is sharded. If it is found that the underlying
+    // collection is (or may be) sharded we return an error to mongos with the view definition
+    // requesting that the resolved read operation be executed there.
+    bool canRunOnMongod();
+
+    void appendResolvedView(BSONObjBuilder& result);
+
+private:
+    static bool collectionIsSharded(OperationContext* opCtx, const std::string& ns);
+
+    bool _viewMayBeSharded;
+    std::string _resolvedViewNamespace;
+    std::vector<BSONObj> _resolvedViewDefinition;
 };
 
 }  // namespace mongo
