@@ -712,7 +712,7 @@ void DBClientInterface::findN(vector<BSONObj>& out,
     for (int i = 0; i < nToReturn; i++) {
         if (!c->more())
             break;
-        out.push_back(c->nextSafe().copy());
+        out.push_back(c->nextSafeOwned());
     }
 }
 
@@ -810,6 +810,12 @@ Status DBClientConnection::connect(const HostAndPort& serverAddress) {
     if (!swIsMasterReply.isOK()) {
         _failed = true;
         return swIsMasterReply.getStatus();
+    }
+
+    // Ensure that the isMaster response is "ok:1".
+    auto isMasterStatus = getStatusFromCommandResult(swIsMasterReply.getValue().data);
+    if (!isMasterStatus.isOK()) {
+        return isMasterStatus;
     }
 
     auto swProtocolSet = rpc::parseProtocolSetFromIsMasterReply(swIsMasterReply.getValue().data);

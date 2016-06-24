@@ -45,7 +45,6 @@
 #include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/expression.h"
 #include "mongo/db/pipeline/expression_context.h"
-#include "mongo/db/query/collation/collation_serializer.h"
 #include "mongo/db/query/collation/collator_factory_interface.h"
 #include "mongo/db/repl/read_concern_args.h"
 #include "mongo/util/mongoutils/str.h"
@@ -117,6 +116,7 @@ intrusive_ptr<Pipeline> Pipeline::parseCommand(string& errmsg,
                     str::stream() << collationName << " must be an object, not a "
                                   << typeName(cmdElement.type()),
                     cmdElement.type() == BSONType::Object);
+            pCtx->collation = cmdElement.Obj().getOwned();
             auto statusWithCollator =
                 CollatorFactoryInterface::get(pCtx->opCtx->getServiceContext())
                     ->makeFromBSON(cmdElement.Obj());
@@ -189,20 +189,31 @@ intrusive_ptr<Pipeline> Pipeline::parseCommand(string& errmsg,
                 str::stream() << "pipeline element " << iStep << " is not an object",
                 pipeElement.type() == Object);
 
-        sources.push_back(DocumentSource::parse(pCtx, pipeElement.Obj()));
-        if (sources.back()->isValidInitialSource()) {
-            uassert(28837,
-                    str::stream() << sources.back()->getSourceName()
-                                  << " is only valid as the first stage in a pipeline.",
-                    iStep == 0);
-        }
+        vector<intrusive_ptr<DocumentSource>> stepSources =
+            DocumentSource::parse(pCtx, pipeElement.Obj());
 
-        if (dynamic_cast<DocumentSourceOut*>(sources.back().get())) {
-            uassert(16991, "$out can only be the final stage in the pipeline", iStep == nSteps - 1);
+        // Iterate over the steps in stepSource. stepSource may have more than one step if the
+        // current step is a DocumentSource alias.
+        const size_t nStepSources = stepSources.size();
+        for (size_t iStepSource = 0; iStepSource < nStepSources; ++iStepSource) {
+            sources.push_back(stepSources[iStepSource]);
 
-            uassert(ErrorCodes::InvalidOptions,
-                    "$out can only be used with the 'local' read concern level",
-                    readConcernArgs.getLevel() == repl::ReadConcernLevel::kLocalReadConcern);
+            if (sources.back()->isValidInitialSource()) {
+                uassert(28837,
+                        str::stream() << sources.back()->getSourceName()
+                                      << " is only valid as the first stage in a pipeline.",
+                        iStep == 0 && iStepSource == 0);
+            }
+
+            if (dynamic_cast<DocumentSourceOut*>(sources.back().get())) {
+                uassert(16991,
+                        "$out can only be the final stage in the pipeline",
+                        iStep == nSteps - 1 && iStepSource == nStepSources - 1);
+
+                uassert(ErrorCodes::InvalidOptions,
+                        "$out can only be used with the 'local' read concern level",
+                        readConcernArgs.getLevel() == repl::ReadConcernLevel::kLocalReadConcern);
+            }
         }
     }
 
@@ -245,6 +256,9 @@ Status Pipeline::checkAuthForCommand(ClientBasic* client,
         Privilege::addPrivilegeToPrivilegeVector(
             &privileges,
             Privilege(ResourcePattern::forAnyNormalResource(), ActionType::indexStats));
+    } else if (dps::extractElementAtPath(cmdObj, "pipeline.0.$collStats")) {
+        Privilege::addPrivilegeToPrivilegeVector(&privileges,
+                                                 Privilege(inputResource, ActionType::collStats));
     } else {
         // If no source requiring an alternative permission scheme is specified then default to
         // requiring find() privileges on the given namespace.
@@ -275,6 +289,11 @@ Status Pipeline::checkAuthForCommand(ClientBasic* client,
             Privilege::addPrivilegeToPrivilegeVector(
                 &privileges,
                 Privilege(ResourcePattern::forExactNamespace(fromNs), ActionType::find));
+        } else if (stageName == "$graphLookup" && stage.firstElementType() == Object) {
+            NamespaceString fromNs(db, stage.firstElement()["from"].str());
+            Privilege::addPrivilegeToPrivilegeVector(
+                &privileges,
+                Privilege(ResourcePattern::forExactNamespace(fromNs), ActionType::find));
         }
     }
 
@@ -301,8 +320,8 @@ bool Pipeline::aggSupportsWriteConcern(const BSONObj& cmd) {
 void Pipeline::detachFromOperationContext() {
     pCtx->opCtx = nullptr;
 
-    for (auto* source : sourcesNeedingMongod) {
-        source->setOperationContext(nullptr);
+    for (auto&& source : sources) {
+        source->detachFromOperationContext();
     }
 }
 
@@ -310,9 +329,16 @@ void Pipeline::reattachToOperationContext(OperationContext* opCtx) {
     invariant(pCtx->opCtx == nullptr);
     pCtx->opCtx = opCtx;
 
-    for (auto* source : sourcesNeedingMongod) {
-        source->setOperationContext(opCtx);
+    for (auto&& source : sources) {
+        source->reattachToOperationContext(opCtx);
     }
+}
+
+void Pipeline::setCollator(std::unique_ptr<CollatorInterface> collator) {
+    pCtx->collator = std::move(collator);
+
+    // TODO SERVER-23349: If the pipeline has any DocumentSourceMatch sources, ask them to
+    // re-parse their predicates.
 }
 
 intrusive_ptr<Pipeline> Pipeline::splitForSharded() {
@@ -462,8 +488,7 @@ Document Pipeline::serialize() const {
     }
 
     if (pCtx->collator.get()) {
-        serialized.setField(collationName,
-                            Value(CollationSerializer::specToBSON(pCtx->collator->getSpec())));
+        serialized.setField(collationName, Value(pCtx->collator->getSpec().toBSON()));
     }
 
     return serialized.freeze();
@@ -479,14 +504,6 @@ void Pipeline::stitch() {
         intrusive_ptr<DocumentSource> pTemp(*iter);
         pTemp->setSource(prevSource);
         prevSource = pTemp.get();
-    }
-
-    // Cache the document sources that have a MongodInterface to avoid the cost of a dynamic cast
-    // when updating the OperationContext of their DBDirectClients while executing the pipeline.
-    for (auto&& source : sources) {
-        if (auto* needsMongod = dynamic_cast<DocumentSourceNeedsMongod*>(source.get())) {
-            sourcesNeedingMongod.push_back(needsMongod);
-        }
     }
 }
 

@@ -115,7 +115,8 @@ AutoGetCollectionForRead::~AutoGetCollectionForRead() {
     // Report time spent in read lock
     auto currentOp = CurOp::get(_txn);
     Top::get(_txn->getClient()->getServiceContext())
-        .record(currentOp->getNS(),
+        .record(_txn,
+                currentOp->getNS(),
                 currentOp->getLogicalOp(),
                 -1,  // "read locked"
                 _timer.micros(),
@@ -199,7 +200,8 @@ AutoGetCollectionOrViewForRead::~AutoGetCollectionOrViewForRead() {
     // Report time spent in read lock
     auto currentOp = CurOp::get(_txn);
     Top::get(_txn->getClient()->getServiceContext())
-        .record(currentOp->getNS(),
+        .record(_txn,
+                currentOp->getNS(),
                 currentOp->getLogicalOp(),
                 -1,  // "read locked"
                 _timer.micros(),
@@ -307,7 +309,8 @@ OldClientContext::~OldClientContext() {
 
     auto currentOp = CurOp::get(_txn);
     Top::get(_txn->getClient()->getServiceContext())
-        .record(currentOp->getNS(),
+        .record(_txn,
+                currentOp->getNS(),
                 currentOp->getLogicalOp(),
                 _txn->lockState()->isWriteLocked() ? 1 : -1,
                 _timer.micros(),

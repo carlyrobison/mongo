@@ -105,6 +105,10 @@ public:
         return LogicalOp::opQuery;
     }
 
+    ReadWriteType getReadWriteType() const {
+        return ReadWriteType::kRead;
+    }
+
     std::size_t reserveBytesForReply() const override {
         return FindCommon::kInitReplyBufferSize;
     }
@@ -201,7 +205,7 @@ public:
         std::unique_ptr<PlanExecutor> exec = std::move(statusWithPlanExecutor.getValue());
 
         // Got the execution tree. Explain it.
-        Explain::explainStages(exec.get(), verbosity, out);
+        Explain::explainStages(exec.get(), collection, verbosity, out);
         return Status::OK();
     }
 

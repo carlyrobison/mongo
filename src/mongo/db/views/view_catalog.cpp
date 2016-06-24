@@ -65,17 +65,17 @@ ViewCatalog::ViewCatalog(OperationContext* txn, Database* database) : _db(databa
         RecordData& data = record->data;
 
         // Check the document is valid BSON with only the expected fields.
-        fassertStatusOK(40143, validateBSON(data.data(), data.size()));
+        fassertStatusOK(40169, validateBSON(data.data(), data.size()));
         BSONObj viewDef = data.toBson();
 
         // Make sure we fail when new fields get added to the definition, so we fail safe in case
         // of future format upgrades.
         for (const BSONElement& e : viewDef) {
             std::string name(e.fieldName());
-            fassert(40144, name == "_id" || name == "viewOn" || name == "pipeline");
+            fassert(40170, name == "_id" || name == "viewOn" || name == "pipeline");
         }
         NamespaceString viewName(viewDef["_id"].str());
-        fassert(40145, viewName.db() == database->name());
+        fassert(40171, viewName.db() == database->name());
         _viewMap[viewDef["_id"].str()] = std::make_shared<ViewDefinition>(
             viewName.db(), viewName.coll(), viewDef["viewOn"].str(), viewDef["pipeline"].Obj());
     }

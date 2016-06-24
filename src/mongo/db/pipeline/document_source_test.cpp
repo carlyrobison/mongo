@@ -3351,7 +3351,7 @@ TEST(ObjectForMatch, MissingFieldShouldNotAppearInResult) {
 TEST(ObjectForMatch, ShouldSerializeNothingIfNothingIsNeeded) {
     Document input(fromjson("{a: 1, b: {c: 1}}"));
     BSONObj expected;
-    ASSERT_EQUALS(expected, DocumentSourceMatch::getObjectForMatch(input, {}));
+    ASSERT_EQUALS(expected, DocumentSourceMatch::getObjectForMatch(input, std::set<std::string>{}));
 }
 
 TEST(ObjectForMatch, ShouldExtractEntireArrayFromPrefixOfDottedField) {
@@ -3416,6 +3416,194 @@ public:
     }
 };
 }
+
+namespace DocumentSourceSortByCount {
+using mongo::DocumentSourceSortByCount;
+using mongo::DocumentSourceGroup;
+using mongo::DocumentSourceSort;
+using std::vector;
+using boost::intrusive_ptr;
+
+/**
+ * Fixture to test that $sortByCount returns a DocumentSourceGroup and DocumentSourceSort.
+ */
+class SortByCountReturnsGroupAndSort : public Mock::Base, public unittest::Test {
+public:
+    void testCreateFromBsonResult(BSONObj sortByCountSpec, Value expectedGroupExplain) {
+        vector<intrusive_ptr<DocumentSource>> result =
+            DocumentSourceSortByCount::createFromBson(sortByCountSpec.firstElement(), ctx());
+
+        ASSERT_EQUALS(result.size(), 2UL);
+
+        const auto* groupStage = dynamic_cast<DocumentSourceGroup*>(result[0].get());
+        ASSERT(groupStage);
+
+        const auto* sortStage = dynamic_cast<DocumentSourceSort*>(result[1].get());
+        ASSERT(sortStage);
+
+        // Serialize the DocumentSourceGroup and DocumentSourceSort from $sortByCount so that we can
+        // check the explain output to make sure $group and $sort have the correct fields.
+        const bool explain = true;
+        vector<Value> explainedStages;
+        groupStage->serializeToArray(explainedStages, explain);
+        sortStage->serializeToArray(explainedStages, explain);
+        ASSERT_EQUALS(explainedStages.size(), 2UL);
+
+        auto groupExplain = explainedStages[0];
+        ASSERT_EQ(groupExplain["$group"], expectedGroupExplain);
+
+        auto sortExplain = explainedStages[1];
+        auto expectedSortExplain = Value{Document{{"sortKey", Document{{"count", -1}}}}};
+        ASSERT_EQ(sortExplain["$sort"], expectedSortExplain);
+    }
+};
+
+TEST_F(SortByCountReturnsGroupAndSort, ExpressionFieldPathSpec) {
+    BSONObj spec = BSON("$sortByCount"
+                        << "$x");
+    Value expectedGroupExplain =
+        Value{Document{{"_id", "$x"}, {"count", Document{{"$sum", Document{{"$const", 1}}}}}}};
+    testCreateFromBsonResult(spec, expectedGroupExplain);
+}
+
+TEST_F(SortByCountReturnsGroupAndSort, ExpressionInObjectSpec) {
+    BSONObj spec = BSON("$sortByCount" << BSON("$floor"
+                                               << "$x"));
+    Value expectedGroupExplain =
+        Value{Document{{"_id", Document{{"$floor", Value{BSON_ARRAY("$x")}}}},
+                       {"count", Document{{"$sum", Document{{"$const", 1}}}}}}};
+    testCreateFromBsonResult(spec, expectedGroupExplain);
+
+    spec = BSON("$sortByCount" << BSON("$eq" << BSON_ARRAY("$x" << 15)));
+    expectedGroupExplain =
+        Value{Document{{"_id", Document{{"$eq", Value{BSON_ARRAY("$x" << BSON("$const" << 15))}}}},
+                       {"count", Document{{"$sum", Document{{"$const", 1}}}}}}};
+    testCreateFromBsonResult(spec, expectedGroupExplain);
+}
+
+/**
+ * Fixture to test error cases of the $sortByCount stage.
+ */
+class InvalidSortByCountSpec : public Mock::Base, public unittest::Test {
+public:
+    vector<intrusive_ptr<DocumentSource>> createSortByCount(BSONObj sortByCountSpec) {
+        auto specElem = sortByCountSpec.firstElement();
+        return DocumentSourceSortByCount::createFromBson(specElem, ctx());
+    }
+};
+
+TEST_F(InvalidSortByCountSpec, NonObjectNonStringSpec) {
+    BSONObj spec = BSON("$sortByCount" << 1);
+    ASSERT_THROWS_CODE(createSortByCount(spec), UserException, 40149);
+
+    spec = BSON("$sortByCount" << BSONNULL);
+    ASSERT_THROWS_CODE(createSortByCount(spec), UserException, 40149);
+}
+
+TEST_F(InvalidSortByCountSpec, NonExpressionInObjectSpec) {
+    BSONObj spec = BSON("$sortByCount" << BSON("field1"
+                                               << "$x"));
+    ASSERT_THROWS_CODE(createSortByCount(spec), UserException, 40147);
+}
+
+TEST_F(InvalidSortByCountSpec, NonFieldPathStringSpec) {
+    BSONObj spec = BSON("$sortByCount"
+                        << "test");
+    ASSERT_THROWS_CODE(createSortByCount(spec), UserException, 40148);
+}
+}  // namespace DocumentSourceSortByCount
+
+namespace DocumentSourceCount {
+using mongo::DocumentSourceCount;
+using mongo::DocumentSourceGroup;
+using mongo::DocumentSourceProject;
+using std::vector;
+using boost::intrusive_ptr;
+
+class CountReturnsGroupAndProjectStages : public Mock::Base, public unittest::Test {
+public:
+    void testCreateFromBsonResult(BSONObj countSpec) {
+        vector<intrusive_ptr<DocumentSource>> result =
+            DocumentSourceCount::createFromBson(countSpec.firstElement(), ctx());
+
+        ASSERT_EQUALS(result.size(), 2UL);
+
+        const auto* groupStage = dynamic_cast<DocumentSourceGroup*>(result[0].get());
+        ASSERT(groupStage);
+
+        const auto* projectStage = dynamic_cast<DocumentSourceProject*>(result[1].get());
+        ASSERT(projectStage);
+
+        const bool explain = true;
+        vector<Value> explainedStages;
+        groupStage->serializeToArray(explainedStages, explain);
+        projectStage->serializeToArray(explainedStages, explain);
+        ASSERT_EQUALS(explainedStages.size(), 2UL);
+
+        StringData countName = countSpec.firstElement().valueStringData();
+        Value expectedGroupExplain =
+            Value{Document{{"_id", Document{{"$const", BSONNULL}}},
+                           {countName, Document{{"$sum", Document{{"$const", 1}}}}}}};
+        auto groupExplain = explainedStages[0];
+        ASSERT_EQ(groupExplain["$group"], expectedGroupExplain);
+
+        Value expectedProjectExplain = Value{Document{{"_id", false}, {countName, true}}};
+        auto projectExplain = explainedStages[1];
+        ASSERT_EQ(projectExplain["$project"], expectedProjectExplain);
+    }
+};
+
+TEST_F(CountReturnsGroupAndProjectStages, ValidStringSpec) {
+    BSONObj spec = BSON("$count"
+                        << "myCount");
+    testCreateFromBsonResult(spec);
+
+    spec = BSON("$count"
+                << "quantity");
+    testCreateFromBsonResult(spec);
+}
+
+class InvalidCountSpec : public Mock::Base, public unittest::Test {
+public:
+    vector<intrusive_ptr<DocumentSource>> createCount(BSONObj countSpec) {
+        auto specElem = countSpec.firstElement();
+        return DocumentSourceCount::createFromBson(specElem, ctx());
+    }
+};
+
+TEST_F(InvalidCountSpec, NonStringSpec) {
+    BSONObj spec = BSON("$count" << 1);
+    ASSERT_THROWS_CODE(createCount(spec), UserException, 40156);
+
+    spec = BSON("$count" << BSON("field1"
+                                 << "test"));
+    ASSERT_THROWS_CODE(createCount(spec), UserException, 40156);
+}
+
+TEST_F(InvalidCountSpec, EmptyStringSpec) {
+    BSONObj spec = BSON("$count"
+                        << "");
+    ASSERT_THROWS_CODE(createCount(spec), UserException, 40157);
+}
+
+TEST_F(InvalidCountSpec, FieldPathSpec) {
+    BSONObj spec = BSON("$count"
+                        << "$x");
+    ASSERT_THROWS_CODE(createCount(spec), UserException, 40158);
+}
+
+TEST_F(InvalidCountSpec, EmbeddedNullByteSpec) {
+    BSONObj spec = BSON("$count"
+                        << "te\0st"_sd);
+    ASSERT_THROWS_CODE(createCount(spec), UserException, 40159);
+}
+
+TEST_F(InvalidCountSpec, PeriodInStringSpec) {
+    BSONObj spec = BSON("$count"
+                        << "test.string");
+    ASSERT_THROWS_CODE(createCount(spec), UserException, 40160);
+}
+}  // namespace DocumentSourceCount
 
 class All : public Suite {
 public:
