@@ -73,17 +73,35 @@ class RecordCursor;
  *
  * As an example, if your document source looks like {"$foo": <args>}, with a parsing function
  * 'createFromBson', you would add this line:
- * REGISTER_EXPRESSION(foo, DocumentSourceFoo::createFromBson);
+ * REGISTER_DOCUMENT_SOURCE(foo, DocumentSourceFoo::createFromBson);
  */
-#define REGISTER_DOCUMENT_SOURCE(key, parser)                               \
-    MONGO_INITIALIZER(addToDocSourceParserMap_##key)(InitializerContext*) { \
-        DocumentSource::registerParser("$" #key, (parser));                 \
-        return Status::OK();                                                \
+#define REGISTER_DOCUMENT_SOURCE(key, parser)                                                      \
+    MONGO_INITIALIZER(addToDocSourceParserMap_##key)(InitializerContext*) {                        \
+        auto parserWrapper = [](BSONElement stageSpec,                                             \
+                                const boost::intrusive_ptr<ExpressionContext>& expCtx) {           \
+            return std::vector<boost::intrusive_ptr<DocumentSource>>{(parser)(stageSpec, expCtx)}; \
+        };                                                                                         \
+        DocumentSource::registerParser("$" #key, parserWrapper);                                   \
+        return Status::OK();                                                                       \
+    }
+
+/**
+ * Registers an alias to have the name 'key'. When a stage with name '$key' is found,
+ * 'parser' will be called to construct a vector of DocumentSources.
+ *
+ * As an example, if your document source looks like {"$foo": <args>}, with a parsing function
+ * 'createFromBson', you would add this line:
+ * REGISTER_DOCUMENT_SOURCE_ALIAS(foo, DocumentSourceFoo::createFromBson);
+ */
+#define REGISTER_DOCUMENT_SOURCE_ALIAS(key, parser)                              \
+    MONGO_INITIALIZER(addAliasToDocSourceParserMap_##key)(InitializerContext*) { \
+        DocumentSource::registerParser("$" #key, (parser));                      \
+        return Status::OK();                                                     \
     }
 
 class DocumentSource : public IntrusiveCounterUnsigned {
 public:
-    using Parser = stdx::function<boost::intrusive_ptr<DocumentSource>(
+    using Parser = stdx::function<std::vector<boost::intrusive_ptr<DocumentSource>>(
         BSONElement, const boost::intrusive_ptr<ExpressionContext>&)>;
 
     virtual ~DocumentSource() {}
@@ -206,10 +224,14 @@ public:
      */
     virtual void addInvolvedCollections(std::vector<NamespaceString>* collections) const {}
 
+    virtual void detachFromOperationContext() {}
+
+    virtual void reattachToOperationContext(OperationContext* opCtx) {}
+
     /**
      * Create a DocumentSource pipeline stage from 'stageObj'.
      */
-    static boost::intrusive_ptr<DocumentSource> parse(
+    static std::vector<boost::intrusive_ptr<DocumentSource>> parse(
         const boost::intrusive_ptr<ExpressionContext> expCtx, BSONObj stageObj);
 
     /**
@@ -289,7 +311,7 @@ protected:
  *  It causes a MongodInterface to be injected when in a mongod and prevents mongos from
  *  merging pipelines containing this stage.
  */
-class DocumentSourceNeedsMongod {
+class DocumentSourceNeedsMongod : public DocumentSource {
 public:
     // Wraps mongod-specific functions to allow linking into mongos.
     class MongodInterface {
@@ -326,17 +348,43 @@ public:
 
         virtual bool hasUniqueIdIndex(const NamespaceString& ns) const = 0;
 
+        /**
+         * Appends operation latency statistics for collection "nss" to "builder"
+         */
+        virtual void appendLatencyStats(const NamespaceString& nss,
+                                        BSONObjBuilder* builder) const = 0;
+
         // Add new methods as needed.
     };
 
-    void injectMongodInterface(std::shared_ptr<MongodInterface> mongod) {
+    DocumentSourceNeedsMongod(const boost::intrusive_ptr<ExpressionContext>& expCtx)
+        : DocumentSource(expCtx) {}
+
+    virtual void injectMongodInterface(std::shared_ptr<MongodInterface> mongod) {
         _mongod = mongod;
     }
 
-    void setOperationContext(OperationContext* opCtx) {
+    void detachFromOperationContext() final {
+        invariant(_mongod);
+        _mongod->setOperationContext(nullptr);
+        doDetachFromOperationContext();
+    }
+
+    /**
+     * Derived classes may override this method to register custom detach functionality.
+     */
+    virtual void doDetachFromOperationContext() {}
+
+    void reattachToOperationContext(OperationContext* opCtx) final {
         invariant(_mongod);
         _mongod->setOperationContext(opCtx);
+        doReattachToOperationContext(opCtx);
     }
+
+    /**
+     * Derived classes may override this method to register custom reattach functionality.
+     */
+    virtual void doReattachToOperationContext(OperationContext* opCtx) {}
 
 protected:
     // It is invalid to delete through a DocumentSourceNeedsMongod-typed pointer.
@@ -612,7 +660,7 @@ private:
  * Provides a document source interface to retrieve index statistics for a given namespace.
  * Each document returned represents a single index and mongod instance.
  */
-class DocumentSourceIndexStats final : public DocumentSource, public DocumentSourceNeedsMongod {
+class DocumentSourceIndexStats final : public DocumentSourceNeedsMongod {
 public:
     // virtuals from DocumentSource
     boost::optional<Document> getNext() final;
@@ -851,9 +899,7 @@ public:
     BSONObjSet sorts;
 };
 
-class DocumentSourceOut final : public DocumentSource,
-                                public SplittableDocumentSource,
-                                public DocumentSourceNeedsMongod {
+class DocumentSourceOut final : public DocumentSourceNeedsMongod, public SplittableDocumentSource {
 public:
     // virtuals from DocumentSource
     ~DocumentSourceOut() final;
@@ -1408,9 +1454,7 @@ private:
     std::unique_ptr<Unwinder> _unwinder;
 };
 
-class DocumentSourceGeoNear : public DocumentSource,
-                              public SplittableDocumentSource,
-                              public DocumentSourceNeedsMongod {
+class DocumentSourceGeoNear : public DocumentSourceNeedsMongod, public SplittableDocumentSource {
 public:
     static const long long kDefaultLimit;
 
@@ -1481,9 +1525,8 @@ private:
  * Queries separate collection for equality matches with documents in the pipeline collection.
  * Adds matching documents to a new array field in the input document.
  */
-class DocumentSourceLookUp final : public DocumentSource,
-                                   public SplittableDocumentSource,
-                                   public DocumentSourceNeedsMongod {
+class DocumentSourceLookUp final : public DocumentSourceNeedsMongod,
+                                   public SplittableDocumentSource {
 public:
     boost::optional<Document> getNext() final;
     const char* getSourceName() const final;
@@ -1558,7 +1601,7 @@ private:
     boost::optional<Document> _input;
 };
 
-class DocumentSourceGraphLookUp final : public DocumentSource, public DocumentSourceNeedsMongod {
+class DocumentSourceGraphLookUp final : public DocumentSourceNeedsMongod {
 public:
     boost::optional<Document> getNext() final;
     const char* getSourceName() const final;
@@ -1691,4 +1734,47 @@ private:
     // field, tracking how many results we've returned so far for the current input document.
     long long _outputIndex;
 };
-}
+
+class DocumentSourceSortByCount final {
+public:
+    static std::vector<boost::intrusive_ptr<DocumentSource>> createFromBson(
+        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+
+private:
+    DocumentSourceSortByCount() = default;
+};
+
+class DocumentSourceCount final {
+public:
+    static std::vector<boost::intrusive_ptr<DocumentSource>> createFromBson(
+        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+
+private:
+    DocumentSourceCount() = default;
+};
+
+/**
+ * Provides a document source interface to retrieve collection-level statistics for a given
+ * collection.
+ */
+class DocumentSourceCollStats : public DocumentSourceNeedsMongod {
+public:
+    DocumentSourceCollStats(const boost::intrusive_ptr<ExpressionContext>& pExpCtx)
+        : DocumentSourceNeedsMongod(pExpCtx) {}
+
+    boost::optional<Document> getNext() final;
+
+    const char* getSourceName() const final;
+
+    bool isValidInitialSource() const final;
+
+    Value serialize(bool explain = false) const;
+
+    static boost::intrusive_ptr<DocumentSource> createFromBson(
+        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+
+private:
+    bool _latencySpecified = false;
+    bool _finished = false;
+};
+}  // namespace mongo

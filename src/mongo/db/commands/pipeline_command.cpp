@@ -26,7 +26,7 @@
  * it in the license file.
  */
 
-#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kQuery
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kCommand
 
 #include "mongo/platform/basic.h"
 
@@ -183,15 +183,23 @@ public:
     virtual bool supportsWriteConcern(const BSONObj& cmd) const override {
         return Pipeline::aggSupportsWriteConcern(cmd);
     }
+
     virtual bool slaveOk() const {
         return false;
     }
+
     virtual bool slaveOverrideOk() const {
         return true;
     }
+
     bool supportsReadConcern() const final {
         return true;
     }
+
+    ReadWriteType getReadWriteType() const {
+        return ReadWriteType::kRead;
+    }
+
     virtual void help(stringstream& help) const {
         help << "{ pipeline: [ { $operator: {...}}, ... ]"
              << ", explain: <bool>"
@@ -279,6 +287,13 @@ public:
                 return this->run(txn, db, viewCmd, options, errmsg, result);
             }
 
+            // If the pipeline does not have a user-specified collation, set it from the
+            // collection default.
+            if (pPipeline->getContext()->collation.isEmpty() && collection &&
+                collection->getDefaultCollator()) {
+                pPipeline->setCollator(collection->getDefaultCollator()->clone());
+            }
+
             // This does mongod-specific stuff like creating the input PlanExecutor and adding
             // it to the front of the pipeline if needed.
             std::shared_ptr<PlanExecutor> input =
@@ -311,13 +326,6 @@ public:
                 collection->infoCache()->notifyOfQuery(txn, stats.indexesUsed);
             }
 
-            if (!collection && input) {
-                // If we don't have a collection, we won't be able to register any executors, so
-                // make sure that the input PlanExecutor (likely wrapping an EOFStage) doesn't
-                // need to be registered.
-                invariant(!input->collection());
-            }
-
             if (collection) {
                 const bool isAggCursor = true;  // enable special locking behavior
                 ClientCursor* cursor =
@@ -337,7 +345,7 @@ public:
             //   collection lock later when cleaning up our ClientCursorPin.
             // - In the case where we don't have a collection: our PlanExecutor won't be
             //   registered, so it will be safe to clean it up outside the lock.
-            invariant(NULL == exec.get() || NULL == exec->collection());
+            invariant(!exec || !collection);
         }
 
         try {
@@ -345,6 +353,21 @@ public:
             bool keepCursor = false;
 
             const bool isCursorCommand = !cmdObj["cursor"].eoo();
+
+            // Use of the aggregate command without specifying to use a cursor is deprecated.
+            // Applications should migrate to using cursors. Cursors are strictly more useful than
+            // outputting the results as a single document, since results that fit inside a single
+            // BSONObj will also fit inside a single batch.
+            //
+            // We occasionally log a deprecation warning.
+            if (!isCursorCommand) {
+                RARELY {
+                    warning()
+                        << "Use of the aggregate command without the 'cursor' "
+                           "option is deprecated. See "
+                           "http://dochub.mongodb.org/core/aggregate-without-cursor-deprecation.";
+                }
+            }
 
             // If both explain and cursor are specified, explain wins.
             if (pPipeline->isExplain()) {

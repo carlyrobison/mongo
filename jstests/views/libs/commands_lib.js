@@ -21,6 +21,10 @@ let needsTriage = "TO DO: needs triage";
 
 var viewsCommandTests = {
     _configsvrAddShard: {skip: isAnInternalCommand},
+    _configsvrAddShardToZone: {skip: isAnInternalCommand},
+    _configsvrCommitChunkMigration: {skip: isAnInternalCommand},
+    _configsvrControlBalancer: {skip: isAnInternalCommand},
+    _configsvrMoveChunk: {skip: isAnInternalCommand},
     _getUserCacheGeneration: {skip: isAnInternalCommand},
     _hashBSONElement: {skip: isAnInternalCommand},
     _isSelf: {skip: isAnInternalCommand},

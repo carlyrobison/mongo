@@ -664,7 +664,7 @@ public:
 
             unique_ptr<PlanExecutor> exec = std::move(statusWithPlanExecutor.getValue());
             // Process notifications when the lock is released/reacquired in the loop below
-            exec->registerExec();
+            exec->registerExec(coll);
 
             BSONObj obj;
             PlanExecutor::ExecState state;
@@ -1248,7 +1248,7 @@ void appendOpTimeMetadata(OperationContext* txn,
         // TODO: refactor out of here as part of SERVER-18236
         if (isShardingAware || isConfig) {
             rpc::ShardingMetadata(lastOpTimeFromClient, replCoord->getElectionId())
-                .writeToMetadata(metadataBob, request.getProtocol());
+                .writeToMetadata(metadataBob);
         }
     }
 
@@ -1332,9 +1332,20 @@ void Command::execCommand(OperationContext* txn,
                 replCoord->getReplicationMode() == repl::ReplicationCoordinator::modeReplSet &&
                 !replCoord->canAcceptWritesForDatabase(dbname) &&
                 !replCoord->getMemberState().secondary()) {
-                uasserted(ErrorCodes::NotMasterOrSecondary, "node is recovering");
+
+                uassert(ErrorCodes::NotMasterOrSecondary,
+                        "node is recovering",
+                        !replCoord->getMemberState().recovering());
+                uassert(ErrorCodes::NotMasterOrSecondary,
+                        "node is not in primary or recovering state",
+                        replCoord->getMemberState().primary());
+                // Check ticket SERVER-21432, slaveOk commands are allowed in drain mode
+                uassert(ErrorCodes::NotMasterOrSecondary,
+                        "node is in drain mode",
+                        commandIsOverriddenToRunOnSecondary || commandCanRunOnSecondary);
             }
         }
+
 
         if (command->adminOnly()) {
             LOG(2) << "command: " << request.getCommandName();
@@ -1453,7 +1464,6 @@ bool Command::run(OperationContext* txn,
             replyBuilder->setMetadata(rpc::makeEmptyMetadata());
             return result;
         }
-
         if (!supportsReadConcern()) {
             // Only return an error if a non-nullish readConcern was parsed, but do not process
             // readConcern regardless.
@@ -1490,11 +1500,11 @@ bool Command::run(OperationContext* txn,
                     return result;
                 }
             }
-
             if ((replCoord->getReplicationMode() ==
                      repl::ReplicationCoordinator::Mode::modeReplSet ||
                  testingSnapshotBehaviorInIsolation) &&
-                readConcernArgs.getLevel() == repl::ReadConcernLevel::kMajorityReadConcern) {
+                (readConcernArgs.getLevel() == repl::ReadConcernLevel::kMajorityReadConcern ||
+                 readConcernArgs.getLevel() == repl::ReadConcernLevel::kLinearizableReadConcern)) {
                 // ReadConcern Majority is not supported in ProtocolVersion 0.
                 if (!testingSnapshotBehaviorInIsolation && !replCoord->isV1ElectionProtocol()) {
                     auto result = appendCommandStatus(
@@ -1531,6 +1541,15 @@ bool Command::run(OperationContext* txn,
                 }
             }
         }
+
+        if (readConcernArgs.getLevel() == repl::ReadConcernLevel::kLinearizableReadConcern) {
+            uassert(ErrorCodes::FailedToParse,
+                    "afterOpTime not compatible with read concern level linearizable",
+                    readConcernArgs.getOpTime().isNull());
+            uassert(ErrorCodes::NotMaster,
+                    "cannot satisfy linearizable read concern on non-primary node",
+                    replCoord->getMemberState().primary());
+        }
     }
 
     // run expects non-const bsonobj
@@ -1545,6 +1564,7 @@ bool Command::run(OperationContext* txn,
 
     StatusWith<WriteConcernOptions> wcResult =
         extractWriteConcern(txn, cmd, db, this->supportsWriteConcern(cmd));
+
     if (!wcResult.isOK()) {
         auto result = appendCommandStatus(inPlaceReplyBob, wcResult.getStatus());
         inPlaceReplyBob.doneFast();

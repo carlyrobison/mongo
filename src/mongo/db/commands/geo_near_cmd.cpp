@@ -79,6 +79,10 @@ public:
         return true;
     }
 
+    ReadWriteType getReadWriteType() const {
+        return ReadWriteType::kRead;
+    }
+
     std::size_t reserveBytesForReply() const override {
         return FindCommon::kInitReplyBufferSize;
     }

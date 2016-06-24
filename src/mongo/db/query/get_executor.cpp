@@ -263,6 +263,13 @@ StatusWith<PrepareExecutionResult> prepareExecution(OperationContext* opCtx,
     plannerParams.options = plannerOptions;
     fillOutPlannerParams(opCtx, collection, canonicalQuery.get(), &plannerParams);
 
+    // If the canonical query does not have a user-specified collation, set it from the collection
+    // default.
+    if (canonicalQuery->getQueryRequest().getCollation().isEmpty() &&
+        collection->getDefaultCollator()) {
+        canonicalQuery->setCollator(collection->getDefaultCollator()->clone());
+    }
+
     const IndexDescriptor* descriptor = collection->getIndexCatalog()->findIdIndex(opCtx);
 
     // If we have an _id index we can use an idhack plan.
@@ -511,6 +518,12 @@ StatusWith<unique_ptr<PlanExecutor>> getOplogStartHack(OperationContext* txn,
                       "OplogReplay cursor requested on non-capped collection");
     }
 
+    // If the canonical query does not have a user-specified collation, set it from the collection
+    // default.
+    if (cq->getQueryRequest().getCollation().isEmpty() && collection->getDefaultCollator()) {
+        cq->setCollator(collection->getDefaultCollator()->clone());
+    }
+
     // A query can only do oplog start finding if it has a top-level $gt or $gte predicate over
     // the "ts" field (the operation's timestamp). Find that predicate and pass it to
     // the OplogStart stage.
@@ -583,6 +596,14 @@ StatusWith<unique_ptr<PlanExecutor>> getOplogStartHack(OperationContext* txn,
     params.start = *startLoc;
     params.direction = CollectionScanParams::FORWARD;
     params.tailable = cq->getQueryRequest().isTailable();
+
+    // If the query is just tsExpr, we know that every document in the collection after the first
+    // matching one must also match. To avoid wasting time running the match expression on every
+    // document to be returned, we tell the CollectionScan stage to stop applying the filter once it
+    // finds the first match.
+    if (cq->root() == tsExpr) {
+        params.stopApplyingFilterAfterFirstMatch = true;
+    }
 
     unique_ptr<WorkingSet> ws = make_unique<WorkingSet>();
     unique_ptr<CollectionScan> cs = make_unique<CollectionScan>(txn, params, ws.get(), cq->root());
@@ -822,6 +843,13 @@ StatusWith<unique_ptr<PlanExecutor>> getExecutorUpdate(OperationContext* txn,
     // collection or database creation.
     if (!collection && request->isUpsert()) {
         invariant(request->isExplain());
+    }
+
+    // If the parsed update does not have a user-specified collation, set it from the collection
+    // default.
+    if (collection && parsedUpdate->getRequest()->getCollation().isEmpty() &&
+        collection->getDefaultCollator()) {
+        parsedUpdate->setCollator(collection->getDefaultCollator()->clone());
     }
 
     // TODO: This seems a bit circuitious.
@@ -1313,8 +1341,12 @@ StatusWith<unique_ptr<PlanExecutor>> getExecutorDistinct(OperationContext* txn,
                                                          PlanExecutor::YieldPolicy yieldPolicy) {
     if (!collection) {
         // Treat collections that do not exist as empty collections.
-        return PlanExecutor::make(
-            txn, make_unique<WorkingSet>(), make_unique<EOFStage>(txn), ns, yieldPolicy);
+        return PlanExecutor::make(txn,
+                                  make_unique<WorkingSet>(),
+                                  make_unique<EOFStage>(txn),
+                                  parsedDistinct->releaseQuery(),
+                                  collection,
+                                  yieldPolicy);
     }
 
     // TODO: check for idhack here?
@@ -1377,6 +1409,12 @@ StatusWith<unique_ptr<PlanExecutor>> getExecutorDistinct(OperationContext* txn,
     }
 
     unique_ptr<CanonicalQuery> cq = std::move(statusWithCQ.getValue());
+
+    // If the canonical query does not have a user-specified collation, set it from the collection
+    // default.
+    if (cq->getQueryRequest().getCollation().isEmpty() && collection->getDefaultCollator()) {
+        cq->setCollator(collection->getDefaultCollator()->clone());
+    }
 
     // If there's no query, we can just distinct-scan one of the indices.
     // Not every index in plannerParams.indices may be suitable. Refer to

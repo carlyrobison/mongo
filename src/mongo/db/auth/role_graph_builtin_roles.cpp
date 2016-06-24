@@ -421,6 +421,10 @@ void addClusterMonitorPrivileges(PrivilegeVector* privileges) {
                   ActionType::find));
     Privilege::addPrivilegeToPrivilegeVector(
         privileges,
+        Privilege(ResourcePattern::forExactNamespace(NamespaceString("local.sources")),
+                  ActionType::find));
+    Privilege::addPrivilegeToPrivilegeVector(
+        privileges,
         Privilege(ResourcePattern::forCollectionName("system.profile"), ActionType::find));
 }
 
@@ -442,12 +446,12 @@ void addClusterManagerPrivileges(PrivilegeVector* privileges) {
         Privilege(ResourcePattern::forAnyNormalResource(), clusterManagerRoleDatabaseActions));
     addReadOnlyDbPrivileges(privileges, "config");
 
-    ActionSet configSettingsActions;
-    configSettingsActions << ActionType::insert << ActionType::update << ActionType::remove;
+    ActionSet writeActions;
+    writeActions << ActionType::insert << ActionType::update << ActionType::remove;
     Privilege::addPrivilegeToPrivilegeVector(
         privileges,
         Privilege(ResourcePattern::forExactNamespace(NamespaceString("config", "settings")),
-                  configSettingsActions));
+                  writeActions));
     Privilege::addPrivilegeToPrivilegeVector(
         privileges,
         Privilege(ResourcePattern::forExactNamespace(NamespaceString("local", "system.replset")),
@@ -455,7 +459,12 @@ void addClusterManagerPrivileges(PrivilegeVector* privileges) {
     Privilege::addPrivilegeToPrivilegeVector(
         privileges,
         Privilege(ResourcePattern::forExactNamespace(NamespaceString("config", "tags")),
-                  configSettingsActions));
+                  writeActions));
+    // Primarily for zone commands
+    Privilege::addPrivilegeToPrivilegeVector(
+        privileges,
+        Privilege(ResourcePattern::forExactNamespace(NamespaceString("config", "shards")),
+                  writeActions));
 }
 
 void addClusterAdminPrivileges(PrivilegeVector* privileges) {

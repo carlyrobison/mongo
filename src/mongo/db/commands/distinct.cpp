@@ -83,14 +83,21 @@ public:
     virtual bool slaveOk() const {
         return false;
     }
+
     virtual bool slaveOverrideOk() const {
         return true;
     }
+
     virtual bool supportsWriteConcern(const BSONObj& cmd) const override {
         return false;
     }
+
     bool supportsReadConcern() const final {
         return true;
+    }
+
+    ReadWriteType getReadWriteType() const {
+        return ReadWriteType::kRead;
     }
 
     std::size_t reserveBytesForReply() const override {
@@ -171,7 +178,7 @@ public:
             return executor.getStatus();
         }
 
-        Explain::explainStages(executor.getValue().get(), verbosity, out);
+        Explain::explainStages(executor.getValue().get(), collection, verbosity, out);
         return Status::OK();
     }
 
@@ -193,9 +200,9 @@ public:
         }
 
         auto qr = &parsedDistinct.getValue().getQuery()->getQueryRequest();
-        auto collator = parsedDistinct.getValue().getQuery()->getCollator();
 
         AutoGetCollectionOrViewForRead ctx(txn, ns);
+
         Collection* collection = ctx.getCollection();
 
         if (auto view = ctx.getView()) {
@@ -251,7 +258,7 @@ public:
         char* start = bb.buf();
 
         BSONArrayBuilder arr(bb);
-        BSONElementSet values(collator);
+        BSONElementSet values(executor.getValue()->getCanonicalQuery()->getCollator());
 
         BSONObj obj;
         PlanExecutor::ExecState state;

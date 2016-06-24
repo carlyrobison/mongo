@@ -48,13 +48,14 @@
 #include "mongo/db/matcher/extensions_callback_real.h"
 #include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/pipeline.h"
-#include "mongo/db/query/collation/collation_serializer.h"
+#include "mongo/db/query/collation/collator_interface.h"
 #include "mongo/db/query/get_executor.h"
 #include "mongo/db/query/plan_summary_stats.h"
 #include "mongo/db/query/query_planner.h"
 #include "mongo/db/s/sharded_connection_info.h"
 #include "mongo/db/s/sharding_state.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/stats/top.h"
 #include "mongo/db/storage/record_store.h"
 #include "mongo/db/storage/sorted_data_interface.h"
 #include "mongo/s/chunk_version.h"
@@ -127,6 +128,10 @@ public:
         }
 
         return collection->getIndexCatalog()->findIdIndex(_ctx->opCtx);
+    }
+
+    void appendLatencyStats(const NamespaceString& nss, BSONObjBuilder* builder) const {
+        Top::get(_ctx->opCtx->getServiceContext()).appendLatencyStats(nss.ns(), builder);
     }
 
 private:
@@ -214,9 +219,15 @@ StatusWith<std::unique_ptr<PlanExecutor>> attemptToGetExecutor(
     qr->setFilter(queryObj);
     qr->setProj(projectionObj);
     qr->setSort(sortObj);
-    if (pExpCtx->collator) {
-        qr->setCollation(CollationSerializer::specToBSON(pExpCtx->collator->getSpec()));
-    }
+
+    // If the pipeline has a non-null collator, set the collation option to the result of
+    // serializing the collator's spec back into BSON. We do this in order to fill in all options
+    // that the user omitted.
+    //
+    // If pipeline has a null collator (representing the "simple" collation), we simply set the
+    // collation option to the original user BSON.
+    qr->setCollation(pExpCtx->collator ? pExpCtx->collator->getSpec().toBSON()
+                                       : pExpCtx->collation);
 
     const ExtensionsCallbackReal extensionsCallback(pExpCtx->opCtx, &pExpCtx->ns);
 
