@@ -171,7 +171,11 @@
     if (!inShardedCollection) {
         // Compact
         // Use force:true in case we're in replset.
-        assert.commandWorked(testDB.runCommand({compact: testColl.getName(), force: true}));
+        var commandResult = testDB.runCommand({compact: testColl.getName(), force: true});
+        // If storage engine supports compact, it should count as a command.
+        if (!commandResult.ok) {
+            assert.commandFailedWithCode(commandResult, ErrorCodes.CommandNotSupported);
+        }
         lastHistogram = checkHistogramDiff(0, 0, 1);
     }
 

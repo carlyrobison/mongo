@@ -92,7 +92,8 @@ public:
                 LogicalOp logicalOp,
                 int lockType,
                 long long micros,
-                bool command);
+                bool command,
+                Command::ReadWriteType readWriteType);
 
     void append(BSONObjBuilder& b);
 
@@ -108,7 +109,9 @@ public:
     /**
      * Increments the global histogram.
      */
-    void incrementGlobalLatencyStats(OperationContext* txn, uint64_t latency);
+    void incrementGlobalLatencyStats(OperationContext* txn,
+                                     uint64_t latency,
+                                     Command::ReadWriteType readWriteType);
 
     /**
      * Appends the global latency statistics.
@@ -116,8 +119,6 @@ public:
     void appendGlobalLatencyStats(BSONObjBuilder* builder);
 
 private:
-    static Command::ReadWriteType _getReadWriteType(Command* cmd, LogicalOp logicalOp);
-
     void _appendToUsageMap(BSONObjBuilder& b, const UsageMap& map) const;
 
     void _appendStatsEntry(BSONObjBuilder& b, const char* statsName, const UsageData& map) const;
@@ -126,11 +127,13 @@ private:
                  CollectionData& c,
                  LogicalOp logicalOp,
                  int lockType,
-                 long long micros);
+                 long long micros,
+                 Command::ReadWriteType readWriteType);
 
     void _incrementHistogram(OperationContext* txn,
                              long long latency,
-                             OperationLatencyHistogram* histogram);
+                             OperationLatencyHistogram* histogram,
+                             Command::ReadWriteType readWriteType);
 
     mutable SimpleMutex _lock;
     OperationLatencyHistogram _globalHistogramStats;

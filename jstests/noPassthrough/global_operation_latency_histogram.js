@@ -139,7 +139,11 @@
     lastHistogram = checkHistogramDiff(0, 0, 1);
 
     // Compact
-    assert.commandWorked(testDB.runCommand({compact: testColl.getName()}));
+    var commandResult = testDB.runCommand({compact: testColl.getName()});
+    // If storage engine supports compact, it should count as a command.
+    if (!commandResult.ok) {
+        assert.commandFailedWithCode(commandResult, ErrorCodes.CommandNotSupported);
+    }
     lastHistogram = checkHistogramDiff(0, 0, 1);
 
     // DataSize

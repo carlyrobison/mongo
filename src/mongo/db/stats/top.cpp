@@ -34,7 +34,6 @@
 #include "mongo/db/stats/top.h"
 
 #include "mongo/db/commands/server_status_metric.h"
-#include "mongo/db/curop.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/service_context.h"
 #include "mongo/util/log.h"
@@ -79,7 +78,8 @@ void Top::record(OperationContext* txn,
                  LogicalOp logicalOp,
                  int lockType,
                  long long micros,
-                 bool command) {
+                 bool command,
+                 Command::ReadWriteType readWriteType) {
     if (ns[0] == '?')
         return;
 
@@ -94,13 +94,17 @@ void Top::record(OperationContext* txn,
     }
 
     CollectionData& coll = _usage[hashedNs];
-    _record(txn, coll, logicalOp, lockType, micros);
+    _record(txn, coll, logicalOp, lockType, micros, readWriteType);
 }
 
-void Top::_record(
-    OperationContext* txn, CollectionData& c, LogicalOp logicalOp, int lockType, long long micros) {
+void Top::_record(OperationContext* txn,
+                  CollectionData& c,
+                  LogicalOp logicalOp,
+                  int lockType,
+                  long long micros,
+                  Command::ReadWriteType readWriteType) {
 
-    _incrementHistogram(txn, micros, &c.opLatencyHistogram);
+    _incrementHistogram(txn, micros, &c.opLatencyHistogram, readWriteType);
 
     c.total.inc(micros);
 
@@ -200,9 +204,11 @@ void Top::appendLatencyStats(StringData ns, BSONObjBuilder* builder) {
     builder->append("latencyStats", latencyStatsBuilder.obj());
 }
 
-void Top::incrementGlobalLatencyStats(OperationContext* txn, uint64_t latency) {
+void Top::incrementGlobalLatencyStats(OperationContext* txn,
+                                      uint64_t latency,
+                                      Command::ReadWriteType readWriteType) {
     stdx::lock_guard<SimpleMutex> guard(_lock);
-    _incrementHistogram(txn, latency, &_globalHistogramStats);
+    _incrementHistogram(txn, latency, &_globalHistogramStats, readWriteType);
 }
 
 void Top::appendGlobalLatencyStats(BSONObjBuilder* builder) {
@@ -210,33 +216,13 @@ void Top::appendGlobalLatencyStats(BSONObjBuilder* builder) {
     _globalHistogramStats.append(builder);
 }
 
-Command::ReadWriteType Top::_getReadWriteType(Command* cmd, LogicalOp logicalOp) {
-    // For legacy operations, cmd may be a nullptr.
-    if (cmd) {
-        return cmd->getReadWriteType();
-    }
-    switch (logicalOp) {
-        case LogicalOp::opGetMore:
-        case LogicalOp::opQuery:
-            return Command::ReadWriteType::kRead;
-        case LogicalOp::opUpdate:
-        case LogicalOp::opInsert:
-        case LogicalOp::opDelete:
-            return Command::ReadWriteType::kWrite;
-        default:
-            return Command::ReadWriteType::kCommand;
-    }
-}
-
 void Top::_incrementHistogram(OperationContext* txn,
                               long long latency,
-                              OperationLatencyHistogram* histogram) {
+                              OperationLatencyHistogram* histogram,
+                              Command::ReadWriteType readWriteType) {
     // Only update histogram if operation came from a user.
     Client* client = txn->getClient();
     if (client->isFromUserConnection() && !client->isInDirectClient()) {
-        CurOp* curOp = CurOp::get(txn);
-        Command* cmd = curOp->getCommand();
-        Command::ReadWriteType readWriteType = _getReadWriteType(cmd, curOp->getLogicalOp());
         histogram->increment(latency, readWriteType);
     }
 }

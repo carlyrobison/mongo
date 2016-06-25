@@ -120,7 +120,8 @@ AutoGetCollectionForRead::~AutoGetCollectionForRead() {
                 currentOp->getLogicalOp(),
                 -1,  // "read locked"
                 _timer.micros(),
-                currentOp->isCommand());
+                currentOp->isCommand(),
+                currentOp->getReadWriteType());
 }
 
 void AutoGetCollectionForRead::_ensureMajorityCommittedSnapshotIsValid(const NamespaceString& nss) {
@@ -205,7 +206,8 @@ AutoGetCollectionOrViewForRead::~AutoGetCollectionOrViewForRead() {
                 currentOp->getLogicalOp(),
                 -1,  // "read locked"
                 _timer.micros(),
-                currentOp->isCommand());
+                currentOp->isCommand(),
+                currentOp->getReadWriteType());
 
     unlock();
 }
@@ -314,7 +316,8 @@ OldClientContext::~OldClientContext() {
                 currentOp->getLogicalOp(),
                 _txn->lockState()->isWriteLocked() ? 1 : -1,
                 _timer.micros(),
-                currentOp->isCommand());
+                currentOp->isCommand(),
+                currentOp->getReadWriteType());
 }
 
 

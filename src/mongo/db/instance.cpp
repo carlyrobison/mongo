@@ -688,7 +688,8 @@ void assembleResponse(OperationContext* txn,
 
     logThreshold += currentOp.getExpectedLatencyMs();
     Top::get(txn->getServiceContext())
-        .incrementGlobalLatencyStats(txn, currentOp.totalTimeMicros());
+        .incrementGlobalLatencyStats(
+            txn, currentOp.totalTimeMicros(), currentOp.getReadWriteType());
 
     if (shouldLogOpDebug || debug.executionTime > logThreshold) {
         Locker::LockerInfo lockerInfo;

@@ -38,7 +38,6 @@
 #include "mongo/bson/bsonobjbuilder.h"
 #include "mongo/bson/util/bson_extract.h"
 #include "mongo/client/read_preference.h"
-#include "mongo/client/remote_command_targeter.h"
 #include "mongo/db/client.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/operation_context.h"
@@ -46,7 +45,6 @@
 #include "mongo/s/balancer/balancer_chunk_selection_policy_impl.h"
 #include "mongo/s/balancer/balancer_configuration.h"
 #include "mongo/s/balancer/cluster_statistics_impl.h"
-#include "mongo/s/catalog/catalog_cache.h"
 #include "mongo/s/catalog/sharding_catalog_client.h"
 #include "mongo/s/catalog/type_chunk.h"
 #include "mongo/s/client/shard.h"
@@ -198,7 +196,7 @@ Status executeSingleMigration(OperationContext* txn,
         maxChunkSizeBytes,
         secondaryThrottle,
         waitForDelete,
-        false);  // takeDistLock flag.
+        true);  // takeDistLock flag.
 
     appendOperationDeadlineIfSet(txn, &builder);
 
@@ -211,61 +209,12 @@ Status executeSingleMigration(OperationContext* txn,
         status = {ErrorCodes::ShardNotFound,
                   str::stream() << "shard " << migrateInfo.from << " not found"};
     } else {
-        const std::string whyMessage(
-            str::stream() << "migrating chunk " << ChunkRange(c->getMin(), c->getMax()).toString()
-                          << " in "
-                          << nss.ns());
-        StatusWith<Shard::CommandResponse> cmdStatus{ErrorCodes::InternalError, "Uninitialized"};
-
-        // Send the first moveChunk command with the balancer holding the distlock.
-        {
-            StatusWith<DistLockManager::ScopedDistLock> distLockStatus =
-                Grid::get(txn)->catalogClient(txn)->distLock(txn, nss.ns(), whyMessage);
-            if (!distLockStatus.isOK()) {
-                const std::string msg = str::stream()
-                    << "Could not acquire collection lock for " << nss.ns() << " to migrate chunk ["
-                    << c->getMin() << "," << c->getMax() << ") due to "
-                    << distLockStatus.getStatus().toString();
-                warning() << msg;
-                return {distLockStatus.getStatus().code(), msg};
-            }
-
-            cmdStatus = shard->runCommand(txn,
-                                          ReadPreferenceSetting{ReadPreference::PrimaryOnly},
-                                          "admin",
-                                          cmdObj,
-                                          Shard::RetryPolicy::kNotIdempotent);
-        }
-
-        if (cmdStatus == ErrorCodes::LockBusy) {
-            // The moveChunk source shard attempted to take the distlock despite being told not to
-            // do so. The shard is likely v3.2 or earlier, which always expects to take the
-            // distlock. Reattempt the moveChunk without the balancer holding the distlock so that
-            // the shard can successfully acquire it.
-            BSONObjBuilder builder;
-            MoveChunkRequest::appendAsCommand(
-                &builder,
-                nss,
-                cm->getVersion(),
-                Grid::get(txn)->shardRegistry()->getConfigServerConnectionString(),
-                migrateInfo.from,
-                migrateInfo.to,
-                ChunkRange(c->getMin(), c->getMax()),
-                maxChunkSizeBytes,
-                secondaryThrottle,
-                waitForDelete,
-                true);  // takeDistLock flag.
-
-            appendOperationDeadlineIfSet(txn, &builder);
-
-            BSONObj cmdObj = builder.obj();
-
-            cmdStatus = shard->runCommand(txn,
-                                          ReadPreferenceSetting{ReadPreference::PrimaryOnly},
-                                          "admin",
-                                          cmdObj,
-                                          Shard::RetryPolicy::kIdempotent);
-        }
+        StatusWith<Shard::CommandResponse> cmdStatus =
+            shard->runCommand(txn,
+                              ReadPreferenceSetting{ReadPreference::PrimaryOnly},
+                              "admin",
+                              cmdObj,
+                              Shard::RetryPolicy::kNotIdempotent);
 
         if (!cmdStatus.isOK()) {
             status = std::move(cmdStatus.getStatus());
@@ -427,7 +376,7 @@ void Balancer::report(BSONObjBuilder* builder) {
 void Balancer::_mainThread() {
     Client::initThread("Balancer");
 
-    // TODO (SERVER-XXXXX): Balancer thread should only keep the operation context alive while it is
+    // TODO (SERVER-24754): Balancer thread should only keep the operation context alive while it is
     // doing balancing
     const auto txn = cc().makeOperationContext();
 
@@ -440,18 +389,9 @@ void Balancer::_mainThread() {
     // The balancer thread is holding the balancer during its entire lifetime
     boost::optional<DistLockManager::ScopedDistLock> scopedBalancerLock;
 
-    // Initialization
+    // Take the balancer distributed lock
     while (!_stopRequested() && !scopedBalancerLock) {
         auto shardingContext = Grid::get(txn.get());
-
-        // Init the balancer
-        if (!_init(txn.get())) {
-            log() << "Balancer will retry initialization in one minute";
-            sleepFor(kInitBackoffInterval);
-            continue;
-        }
-
-        // Take the balancer distributed lock
         auto scopedDistLock =
             shardingContext->catalogClient(txn.get())->getDistLockManager()->lockWithSessionID(
                 txn.get(),
@@ -463,7 +403,7 @@ void Balancer::_mainThread() {
             warning() << "Balancer distributed lock could not be acquired and will be retried in "
                          "one minute"
                       << causedBy(scopedDistLock.getStatus());
-            sleepFor(kInitBackoffInterval);
+            _sleepFor(txn.get(), kInitBackoffInterval);
             continue;
         }
 
@@ -474,8 +414,6 @@ void Balancer::_mainThread() {
     log() << "CSRS balancer started with instance id " << csrsBalancerLockSessionID;
 
     // Main balancer loop
-    Seconds balanceRoundInterval(kBalanceRoundDefaultInterval);
-
     while (!_stopRequested()) {
         auto shardingContext = Grid::get(txn.get());
         auto balancerConfig = shardingContext->getBalancerConfiguration();
@@ -488,22 +426,15 @@ void Balancer::_mainThread() {
             Status refreshStatus = balancerConfig->refreshAndCheck(txn.get());
             if (!refreshStatus.isOK()) {
                 warning() << "Skipping balancing round" << causedBy(refreshStatus);
-
-                // Tell scripts that the balancer is not active anymore
-                _endRound(txn.get(), balanceRoundInterval);
+                _endRound(txn.get(), kBalanceRoundDefaultInterval);
                 continue;
             }
 
-            // now make sure we should even be running
             if (!balancerConfig->isBalancerActive() || MONGO_FAIL_POINT(skipBalanceRound)) {
-                LOG(1) << "skipping balancing round because balancing is disabled";
-
-                // Tell scripts that the balancer is not active anymore
-                _endRound(txn.get(), balanceRoundInterval);
+                LOG(1) << "Skipping balancing round because balancing is disabled";
+                _endRound(txn.get(), kBalanceRoundDefaultInterval);
                 continue;
             }
-
-            uassert(13258, "oids broken after resetting!", _checkOIDs(txn.get()));
 
             {
                 LOG(1) << "*** start balancing round. "
@@ -543,9 +474,9 @@ void Balancer::_mainThread() {
                 LOG(1) << "*** End of balancing round";
             }
 
-            // Tell scripts that the balancer is not active anymore
             _endRound(txn.get(),
-                      _balancedLastTime ? kShortBalanceRoundInterval : balanceRoundInterval);
+                      _balancedLastTime ? kShortBalanceRoundInterval
+                                        : kBalanceRoundDefaultInterval);
         } catch (const std::exception& e) {
             log() << "caught exception while doing balance: " << e.what();
 
@@ -559,7 +490,7 @@ void Balancer::_mainThread() {
                 txn.get(), "balancer.round", "", roundDetails.toBSON());
 
             // Sleep a fair amount before retrying because of the error
-            _endRound(txn.get(), balanceRoundInterval);
+            _endRound(txn.get(), kBalanceRoundDefaultInterval);
         }
     }
 
@@ -572,40 +503,27 @@ bool Balancer::_stopRequested() {
 }
 
 void Balancer::_beginRound(OperationContext* txn) {
-    // Use fresh shard state and balancer settings
     Grid::get(txn)->shardRegistry()->reload(txn);
+    uassert(13258, "oids broken after resetting!", _checkOIDs(txn));
 
     stdx::unique_lock<stdx::mutex> lock(_mutex);
     _inBalancerRound = true;
 }
 
 void Balancer::_endRound(OperationContext* txn, Seconds waitTimeout) {
-    stdx::unique_lock<stdx::mutex> lock(_mutex);
-    _inBalancerRound = false;
-    _numBalancerRounds++;
-    _condVar.wait_for(lock, waitTimeout.toSystemDuration());
+    {
+        stdx::lock_guard<stdx::mutex> lock(_mutex);
+        _inBalancerRound = false;
+        _numBalancerRounds++;
+    }
+
+    _sleepFor(txn, waitTimeout);
 }
 
-bool Balancer::_init(OperationContext* txn) {
-    try {
-        // Contact the config server and refresh shard information. Checks that each shard is indeed
-        // a different process (no hostname mixup).
-        //
-        // These checks are redundant in that they're redone at every new round but we want to do
-        // them initially here so to catch any problem soon.
-        Grid::get(txn)->shardRegistry()->reload(txn);
-
-        if (!_checkOIDs(txn)) {
-            return false;
-        }
-
-        log() << "Config servers and shards contacted successfully";
-        return true;
-    } catch (const std::exception& e) {
-        warning() << "could not initialize balancer, please check that all shards and config "
-                     "servers are up: "
-                  << e.what();
-        return false;
+void Balancer::_sleepFor(OperationContext* txn, Seconds waitTimeout) {
+    stdx::unique_lock<stdx::mutex> lock(_mutex);
+    if (_state == kRunning) {
+        _condVar.wait_for(lock, waitTimeout.toSystemDuration());
     }
 }
 
@@ -619,6 +537,10 @@ bool Balancer::_checkOIDs(OperationContext* txn) {
     map<int, ShardId> oids;
 
     for (const ShardId& shardId : all) {
+        if (_stopRequested()) {
+            return false;
+        }
+
         const auto s = shardingContext->shardRegistry()->getShard(txn, shardId);
         if (!s) {
             continue;

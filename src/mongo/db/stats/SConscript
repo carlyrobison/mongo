@@ -33,7 +33,6 @@ env.Library(
     LIBDEPS=[
         '$BUILD_DIR/mongo/db/service_context',
         '$BUILD_DIR/mongo/db/commands/server_status_core',
-        '$BUILD_DIR/mongo/db/curop',
     ],
 )
 

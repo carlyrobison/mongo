@@ -91,7 +91,8 @@ void finishCurOp(OperationContext* txn, CurOp* curOp) {
                     curOp->getLogicalOp(),
                     1,  // "write locked"
                     curOp->totalTimeMicros(),
-                    curOp->isCommand());
+                    curOp->isCommand(),
+                    curOp->getReadWriteType());
 
         if (!curOp->debug().exceptionInfo.empty()) {
             LOG(3) << "Caught Assertion in " << logicalOpToString(curOp->getLogicalOp()) << ": "
@@ -398,7 +399,8 @@ WriteResult performInserts(OperationContext* txn, const InsertOp& wholeOp) {
                     LogicalOp::opInsert,
                     1 /* write locked*/,
                     curOp.totalTimeMicros(),
-                    curOp.isCommand());
+                    curOp.isCommand(),
+                    curOp.getReadWriteType());
 
     });
 
