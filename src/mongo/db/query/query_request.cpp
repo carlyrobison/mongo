@@ -1004,8 +1004,7 @@ BSONObj QueryRequest::asAggregationCommand() const {
 }
 
 BSONObj QueryRequest::asExpandedViewAggregation(
-    StringData cmd,
-    const std::vector<BSONElement>& resolvedViewPipeline) const {
+    StringData cmd, const std::vector<BSONElement>& resolvedViewPipeline) const {
     BSONObjBuilder b;
     asAggregationCommand(&b, cmd, &resolvedViewPipeline);
     return b.obj();

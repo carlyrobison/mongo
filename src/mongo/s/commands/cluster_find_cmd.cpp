@@ -137,7 +137,8 @@ public:
 
         auto& qr = qrStatus.getValue();
 
-        auto statusWithCQ = CanonicalQuery::canonicalize(txn, std::move(qr), ExtensionsCallbackNoop());
+        auto statusWithCQ =
+            CanonicalQuery::canonicalize(txn, std::move(qr), ExtensionsCallbackNoop());
         if (!statusWithCQ.isOK()) {
             return statusWithCQ.getStatus();
         }

@@ -73,7 +73,6 @@ namespace dps = ::mongo::dotted_path_support;
 namespace {
 
 const char kKeyField[] = "key";
-
 }
 
 class DistinctCommand : public Command {

@@ -63,10 +63,10 @@ public:
     }
 
     static StatusWith<ParsedDistinct> parse(OperationContext* txn,
-                                     const NamespaceString& nss,
-                                     const BSONObj& cmdObj,
-                                     const ExtensionsCallback& extensionsCallback,
-                                     bool isExplain) {
+                                            const NamespaceString& nss,
+                                            const BSONObj& cmdObj,
+                                            const ExtensionsCallback& extensionsCallback,
+                                            bool isExplain) {
         const char kKeyField[] = "key";
         const char kQueryField[] = "query";
         const char kCollationField[] = "collation";

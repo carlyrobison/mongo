@@ -33,6 +33,6 @@
 
     // TODO: Fix count
     // assert.eq(10, view.count({a: {$gte: 0}}));
-    
+
     // TODO: Add explain tests
 })();

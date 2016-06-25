@@ -70,8 +70,8 @@ void ViewDefinition::changePipeline(const BSONObj& pipeline) {
 }
 
 BSONObj ViewDefinition::pipelineToViewAggregation(const std::string resolvedViewNs,
-                                                 const std::vector<BSONObj>& resolvedViewPipeline,
-                                                 const BSONObj& cmdObj) {
+                                                  const std::vector<BSONObj>& resolvedViewPipeline,
+                                                  const BSONObj& cmdObj) {
     BSONObjBuilder b;
     std::vector<BSONObj> pipeline;
     auto colName = NamespaceString(resolvedViewNs).coll().toString();

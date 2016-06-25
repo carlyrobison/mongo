@@ -1115,13 +1115,14 @@ public:
                                          bool isExplain) {
         NamespaceString nss(resolvedViewNs);
 
-        auto parsedDistinct = ParsedDistinct::parse(txn, nss, cmdObj, ExtensionsCallbackNoop(), false);
+        auto parsedDistinct =
+            ParsedDistinct::parse(txn, nss, cmdObj, ExtensionsCallbackNoop(), false);
         if (!parsedDistinct.isOK()) {
             return parsedDistinct.getStatus();
         }
 
         auto qr = &parsedDistinct.getValue().getQuery()->getQueryRequest();
-    
+
         Status viewValidationStatus = qr->validateForView();
         if (!viewValidationStatus.isOK()) {
             return viewValidationStatus;
@@ -1150,15 +1151,16 @@ public:
                     invariant(!viewDef.isEmpty());
 
                     StatusWith<BSONObj> match = convertViewToAgg(txn,
-                                                     viewDef["ns"].valueStringData(),
-                                                     viewDef["pipeline"].Array(),
-                                                     cmdObj,
-                                                     false);
+                                                                 viewDef["ns"].valueStringData(),
+                                                                 viewDef["pipeline"].Array(),
+                                                                 cmdObj,
+                                                                 false);
                     if (match.isOK()) {
                         result.resetToEmpty();
 
                         Command* c = Command::findCommand("aggregate");
-                        bool retval = c->run(txn, dbName, match.getValue(), options, errmsg, result);
+                        bool retval =
+                            c->run(txn, dbName, match.getValue(), options, errmsg, result);
                         return retval;
                     }
 
