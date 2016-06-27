@@ -1747,9 +1747,7 @@ DBCollection.prototype.distinct = function(keyString, query, options) {
         throw new Error("distinct failed: " + tojson(res));
     }
 
-    var ret = (res.result) ? res.result[0][keyString] : res.values;
-
-    return ret;
+    return res.values;
 };
 
 DBCollection.prototype._distinct = function(keyString, query) {
