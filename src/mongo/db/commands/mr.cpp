@@ -69,7 +69,6 @@
 #include "mongo/db/s/sharded_connection_info.h"
 #include "mongo/db/s/sharding_state.h"
 #include "mongo/db/service_context.h"
-#include "mongo/db/views/view_catalog.h"
 #include "mongo/s/catalog/catalog_cache.h"
 #include "mongo/s/chunk.h"
 #include "mongo/s/chunk_manager.h"
