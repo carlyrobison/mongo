@@ -65,20 +65,6 @@
 
 namespace mongo {
 
-namespace {
-// BSONObj concatenate(BSONObj b1, BSONObj b2) {
-//     BSONObjBuilder b;
-//     std::vector<BSONObj> pipeline;
-//     for (BSONElement e: b2.getObjectField("pipeline")) {
-//         pipeline.push_back(e.Obj());
-//     }
-//     for (BSONElement e: b2.getObjectField("pipeline")) {
-//         pipeline.push_back(e.Obj());
-//     }
-//     return b.append("pipeline", pipeline).obj();
-// }
-}
-
 using boost::intrusive_ptr;
 using std::endl;
 using std::shared_ptr;
