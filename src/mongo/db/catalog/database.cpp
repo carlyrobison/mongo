@@ -219,7 +219,8 @@ Database::Database(OperationContext* txn, StringData name, DatabaseCatalogEntry*
         const string ns = *it;
         _collections[ns] = _getOrCreateCollectionInstance(txn, ns);
     }
-    if (_collections[_viewsName]) {
+
+    if (_collections.find(_viewsName) != _collections.end()) {
         _views = stdx::make_unique<ViewCatalog>(txn, this);
     }
 }
