@@ -241,7 +241,10 @@ StatusWith<Shard::CommandResponse> ShardRemote::_runCommand(OperationContext* tx
     BSONObj responseMetadata = swResponse.getValue().metadata.getOwned();
     Status commandStatus = getStatusFromCommandResult(responseObj);
     Status writeConcernStatus = getWriteConcernStatusFromCommandResult(responseObj);
+
+    // Tell the replica set monitor of any errors
     updateReplSetMonitor(host.getValue(), commandStatus);
+    updateReplSetMonitor(host.getValue(), writeConcernStatus);
 
     return CommandResponse(std::move(responseObj),
                            std::move(responseMetadata),
@@ -367,6 +370,13 @@ StatusWith<Shard::QueryResponse> ShardRemote::_exhaustiveFindOnConfig(
     }
 
     return response;
+}
+
+Status ShardRemote::createIndexOnConfig(OperationContext* txn,
+                                        const NamespaceString& ns,
+                                        const BSONObj& keys,
+                                        bool unique) {
+    MONGO_UNREACHABLE;
 }
 
 }  // namespace mongo

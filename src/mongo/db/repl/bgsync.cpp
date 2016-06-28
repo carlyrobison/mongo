@@ -37,7 +37,6 @@
 #include "mongo/client/connection_pool.h"
 #include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/client.h"
-#include "mongo/db/commands/fsync.h"
 #include "mongo/db/commands/server_status_metric.h"
 #include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/dbhelpers.h"
@@ -52,11 +51,8 @@
 #include "mongo/db/repl/storage_interface.h"
 #include "mongo/db/repl/sync_source_resolver.h"
 #include "mongo/db/stats/timer_stats.h"
-#include "mongo/executor/network_interface_factory.h"
 #include "mongo/rpc/metadata/repl_set_metadata.h"
 #include "mongo/stdx/memory.h"
-#include "mongo/util/concurrency/thread_pool.h"
-#include "mongo/util/exit.h"
 #include "mongo/util/fail_point_service.h"
 #include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
@@ -106,18 +102,6 @@ bool DataReplicatorExternalStateBackgroundSync::shouldStopFetching(
     return DataReplicatorExternalStateImpl::shouldStopFetching(source, metadata);
 }
 
-/**
- * Returns new thread pool for thead pool task executor.
- */
-std::unique_ptr<ThreadPool> makeThreadPool() {
-    ThreadPool::Options threadPoolOptions;
-    threadPoolOptions.poolName = "rsBackgroundSync";
-    threadPoolOptions.onCreateThread = [](const std::string& threadName) {
-        Client::initThread(threadName.c_str());
-    };
-    return stdx::make_unique<ThreadPool>(threadPoolOptions);
-}
-
 size_t getSize(const BSONObj& o) {
     // SERVER-9808 Avoid Fortify complaint about implicit signed->unsigned conversion
     return static_cast<size_t>(o.objsize());
@@ -156,8 +140,6 @@ BackgroundSync::BackgroundSync(
     ReplicationCoordinatorExternalState* replicationCoordinatorExternalState,
     std::unique_ptr<OplogBuffer> oplogBuffer)
     : _oplogBuffer(std::move(oplogBuffer)),
-      _threadPoolTaskExecutor(makeThreadPool(),
-                              executor::makeNetworkInterface("NetworkInterfaceASIO-BGSync")),
       _replCoord(getGlobalReplicationCoordinator()),
       _replicationCoordinatorExternalState(replicationCoordinatorExternalState),
       _syncSourceResolver(_replCoord),
@@ -170,7 +152,6 @@ BackgroundSync::BackgroundSync(
 
 void BackgroundSync::startup(OperationContext* txn) {
     _oplogBuffer->startup(txn);
-    _threadPoolTaskExecutor.startup();
 
     invariant(!_producerThread);
     _producerThread.reset(new stdx::thread(stdx::bind(&BackgroundSync::_run, this)));
@@ -180,20 +161,28 @@ void BackgroundSync::shutdown(OperationContext* txn) {
     stdx::lock_guard<stdx::mutex> lock(_mutex);
 
     // Clear the buffer in case the producerThread is waiting in push() due to a full queue.
-    invariant(inShutdown());
     clearBuffer(txn);
     _stopped = true;
 
     if (_oplogFetcher) {
         _oplogFetcher->shutdown();
     }
+
+    _inShutdown = true;
 }
 
 void BackgroundSync::join(OperationContext* txn) {
     _producerThread->join();
-    _threadPoolTaskExecutor.shutdown();
-    _threadPoolTaskExecutor.join();
     _oplogBuffer->shutdown(txn);
+}
+
+bool BackgroundSync::inShutdown() const {
+    stdx::lock_guard<stdx::mutex> lock(_mutex);
+    return _inShutdown_inlock();
+}
+
+bool BackgroundSync::_inShutdown_inlock() const {
+    return _inShutdown;
 }
 
 void BackgroundSync::_run() {
@@ -279,7 +268,7 @@ void BackgroundSync::_produce(OperationContext* txn) {
         }
 
         if (_replCoord->isWaitingForApplierToDrain() || _replCoord->getMemberState().primary() ||
-            inShutdownStrict()) {
+            _inShutdown_inlock()) {
             return;
         }
     }
@@ -349,6 +338,7 @@ void BackgroundSync::_produce(OperationContext* txn) {
         _replCoord, _replicationCoordinatorExternalState, this);
     OplogFetcher* oplogFetcher;
     try {
+        auto executor = _replicationCoordinatorExternalState->getTaskExecutor();
         auto config = _replCoord->getConfig();
         auto onOplogFetcherShutdownCallbackFn =
             [&fetcherReturnStatus](const Status& status, const OpTimeWithHash& lastFetched) {
@@ -357,7 +347,7 @@ void BackgroundSync::_produce(OperationContext* txn) {
 
         stdx::lock_guard<stdx::mutex> lock(_mutex);
         _oplogFetcher =
-            stdx::make_unique<OplogFetcher>(&_threadPoolTaskExecutor,
+            stdx::make_unique<OplogFetcher>(executor,
                                             OpTimeWithHash(lastHashFetched, lastOpTimeFetched),
                                             source,
                                             NamespaceString(rsOplogName),
@@ -591,8 +581,6 @@ void BackgroundSync::clearSyncTarget() {
 }
 
 void BackgroundSync::cancelFetcher() {
-    _threadPoolTaskExecutor.cancelAllCommands();
-
     stdx::lock_guard<stdx::mutex> lock(_mutex);
     if (_oplogFetcher) {
         _oplogFetcher->shutdown();

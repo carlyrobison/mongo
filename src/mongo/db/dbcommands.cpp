@@ -96,7 +96,6 @@
 #include "mongo/rpc/metadata/repl_set_metadata.h"
 #include "mongo/rpc/metadata/server_selection_metadata.h"
 #include "mongo/rpc/metadata/sharding_metadata.h"
-#include "mongo/rpc/protocol.h"
 #include "mongo/rpc/reply_builder_interface.h"
 #include "mongo/rpc/reply_builder_interface.h"
 #include "mongo/rpc/request_interface.h"
@@ -1278,8 +1277,6 @@ void Command::execCommand(OperationContext* txn,
             CurOp::get(txn)->setCommand_inlock(command);
         }
 
-        rpc::setOperationProtocol(txn, request.getProtocol());  // SERVER-21485.  Remove after 3.2
-
         // TODO: move this back to runCommands when mongos supports OperationContext
         // see SERVER-18515 for details.
         uassertStatusOK(rpc::readRequestMetadata(txn, request.getMetadata()));
@@ -1464,6 +1461,7 @@ bool Command::run(OperationContext* txn,
             replyBuilder->setMetadata(rpc::makeEmptyMetadata());
             return result;
         }
+
         if (!supportsReadConcern()) {
             // Only return an error if a non-nullish readConcern was parsed, but do not process
             // readConcern regardless.
@@ -1500,11 +1498,11 @@ bool Command::run(OperationContext* txn,
                     return result;
                 }
             }
+
             if ((replCoord->getReplicationMode() ==
                      repl::ReplicationCoordinator::Mode::modeReplSet ||
                  testingSnapshotBehaviorInIsolation) &&
-                (readConcernArgs.getLevel() == repl::ReadConcernLevel::kMajorityReadConcern ||
-                 readConcernArgs.getLevel() == repl::ReadConcernLevel::kLinearizableReadConcern)) {
+                readConcernArgs.getLevel() == repl::ReadConcernLevel::kMajorityReadConcern) {
                 // ReadConcern Majority is not supported in ProtocolVersion 0.
                 if (!testingSnapshotBehaviorInIsolation && !replCoord->isV1ElectionProtocol()) {
                     auto result = appendCommandStatus(
@@ -1541,15 +1539,6 @@ bool Command::run(OperationContext* txn,
                 }
             }
         }
-
-        if (readConcernArgs.getLevel() == repl::ReadConcernLevel::kLinearizableReadConcern) {
-            uassert(ErrorCodes::FailedToParse,
-                    "afterOpTime not compatible with read concern level linearizable",
-                    readConcernArgs.getOpTime().isNull());
-            uassert(ErrorCodes::NotMaster,
-                    "cannot satisfy linearizable read concern on non-primary node",
-                    replCoord->getMemberState().primary());
-        }
     }
 
     // run expects non-const bsonobj
@@ -1564,7 +1553,6 @@ bool Command::run(OperationContext* txn,
 
     StatusWith<WriteConcernOptions> wcResult =
         extractWriteConcern(txn, cmd, db, this->supportsWriteConcern(cmd));
-
     if (!wcResult.isOK()) {
         auto result = appendCommandStatus(inPlaceReplyBob, wcResult.getStatus());
         inPlaceReplyBob.doneFast();

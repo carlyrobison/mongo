@@ -43,15 +43,22 @@
 #include "mongo/client/remote_command_targeter.h"
 #include "mongo/client/replica_set_monitor.h"
 #include "mongo/db/concurrency/d_concurrency.h"
+#include "mongo/db/dbdirectclient.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/db/s/type_shard_identity.h"
 #include "mongo/executor/network_interface.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/rpc/get_status_from_command_result.h"
+#include "mongo/s/catalog/config_server_version.h"
 #include "mongo/s/catalog/sharding_catalog_client.h"
+#include "mongo/s/catalog/type_chunk.h"
+#include "mongo/s/catalog/type_config_version.h"
 #include "mongo/s/catalog/type_database.h"
+#include "mongo/s/catalog/type_lockpings.h"
+#include "mongo/s/catalog/type_locks.h"
 #include "mongo/s/catalog/type_shard.h"
+#include "mongo/s/catalog/type_tags.h"
 #include "mongo/s/client/shard.h"
 #include "mongo/s/client/shard_registry.h"
 #include "mongo/s/grid.h"
@@ -72,6 +79,7 @@ using str::stream;
 namespace {
 
 const ReadPreferenceSetting kConfigReadSelector(ReadPreference::Nearest, TagSet{});
+const ReadPreferenceSetting kConfigPrimarySelector(ReadPreference::PrimaryOnly);
 const WriteConcernOptions kNoWaitWriteConcern(1, WriteConcernOptions::SyncMode::UNSET, Seconds(0));
 
 void toBatchError(const Status& status, BatchedCommandResponse* response) {
@@ -602,8 +610,323 @@ Status ShardingCatalogManagerImpl::addShardToZone(OperationContext* txn,
     return Status::OK();
 }
 
+Status ShardingCatalogManagerImpl::removeShardFromZone(OperationContext* txn,
+                                                       const std::string& shardName,
+                                                       const std::string& zoneName) {
+    ScopedZoneOpExclusiveLock scopedLock(txn);
+
+    auto configShard = Grid::get(txn)->shardRegistry()->getConfigShard();
+    const NamespaceString shardNS(ShardType::ConfigNS);
+
+    //
+    // Check whether the shard even exist in the first place.
+    //
+
+    auto findShardExistsStatus =
+        configShard->exhaustiveFindOnConfig(txn,
+                                            kConfigPrimarySelector,
+                                            repl::ReadConcernLevel::kLocalReadConcern,
+                                            shardNS,
+                                            BSON(ShardType::name() << shardName),
+                                            BSONObj(),
+                                            1);
+
+    if (!findShardExistsStatus.isOK()) {
+        return findShardExistsStatus.getStatus();
+    }
+
+    if (findShardExistsStatus.getValue().docs.size() == 0) {
+        return {ErrorCodes::ShardNotFound,
+                str::stream() << "shard " << shardName << " does not exist"};
+    }
+
+    //
+    // Check how many shards belongs to this zone.
+    //
+
+    auto findShardStatus =
+        configShard->exhaustiveFindOnConfig(txn,
+                                            kConfigPrimarySelector,
+                                            repl::ReadConcernLevel::kLocalReadConcern,
+                                            shardNS,
+                                            BSON(ShardType::tags() << zoneName),
+                                            BSONObj(),
+                                            2);
+
+    if (!findShardStatus.isOK()) {
+        return findShardStatus.getStatus();
+    }
+
+    const auto shardDocs = findShardStatus.getValue().docs;
+
+    if (shardDocs.size() == 0) {
+        // The zone doesn't exists, this could be a retry.
+        return Status::OK();
+    }
+
+    if (shardDocs.size() == 1) {
+        auto shardDocStatus = ShardType::fromBSON(shardDocs.front());
+        if (!shardDocStatus.isOK()) {
+            return shardDocStatus.getStatus();
+        }
+
+        auto shardDoc = shardDocStatus.getValue();
+        if (shardDoc.getName() != shardName) {
+            // The last shard that belongs to this zone is a different shard.
+            // This could be a retry, so return OK.
+            return Status::OK();
+        }
+
+        auto findChunkRangeStatus =
+            configShard->exhaustiveFindOnConfig(txn,
+                                                kConfigPrimarySelector,
+                                                repl::ReadConcernLevel::kLocalReadConcern,
+                                                NamespaceString(TagsType::ConfigNS),
+                                                BSON(TagsType::tag() << zoneName),
+                                                BSONObj(),
+                                                1);
+
+        if (!findChunkRangeStatus.isOK()) {
+            return findChunkRangeStatus.getStatus();
+        }
+
+        if (findChunkRangeStatus.getValue().docs.size() > 0) {
+            return {ErrorCodes::ZoneStillInUse,
+                    "cannot remove a shard from zone if a chunk range is associated with it"};
+        }
+    }
+
+    //
+    // Perform update.
+    //
+
+    auto updateStatus =
+        _catalogClient->updateConfigDocument(txn,
+                                             ShardType::ConfigNS,
+                                             BSON(ShardType::name(shardName)),
+                                             BSON("$pull" << BSON(ShardType::tags() << zoneName)),
+                                             false,
+                                             kNoWaitWriteConcern);
+
+    if (!updateStatus.isOK()) {
+        return updateStatus.getStatus();
+    }
+
+    // The update did not match a document, another thread could have removed it.
+    if (!updateStatus.getValue()) {
+        return {ErrorCodes::ShardNotFound,
+                str::stream() << "shard " << shardName << " no longer exist"};
+    }
+
+    return Status::OK();
+}
+
 void ShardingCatalogManagerImpl::appendConnectionStats(executor::ConnectionPoolStats* stats) {
     _executorForAddShard->appendConnectionStats(stats);
+}
+
+Status ShardingCatalogManagerImpl::initializeConfigDatabaseIfNeeded(OperationContext* txn) {
+    {
+        stdx::lock_guard<stdx::mutex> lk(_mutex);
+        if (_configInitialized) {
+            return Status::OK();
+        }
+    }
+
+    Status status = _initConfigVersion(txn);
+    if (!status.isOK()) {
+        return status;
+    }
+
+    status = _initConfigIndexes(txn);
+    if (!status.isOK()) {
+        return status;
+    }
+
+    stdx::lock_guard<stdx::mutex> lk(_mutex);
+    _configInitialized = true;
+
+    return Status::OK();
+}
+
+StatusWith<VersionType> ShardingCatalogManagerImpl::_getConfigVersion(OperationContext* txn) {
+    auto findStatus = Grid::get(txn)->shardRegistry()->getConfigShard()->exhaustiveFindOnConfig(
+        txn,
+        kConfigReadSelector,
+        // Use local read concern as we're likely to follow this up with a write.
+        repl::ReadConcernLevel::kLocalReadConcern,
+        NamespaceString(VersionType::ConfigNS),
+        BSONObj(),
+        BSONObj(),
+        boost::none /* no limit */);
+    if (!findStatus.isOK()) {
+        return findStatus.getStatus();
+    }
+
+    auto queryResults = findStatus.getValue().docs;
+
+    if (queryResults.size() > 1) {
+        return {ErrorCodes::IncompatibleShardingConfigVersion,
+                str::stream() << "should only have 1 document in " << VersionType::ConfigNS};
+    }
+
+    if (queryResults.empty()) {
+        VersionType versionInfo;
+        versionInfo.setMinCompatibleVersion(UpgradeHistory_EmptyVersion);
+        versionInfo.setCurrentVersion(UpgradeHistory_EmptyVersion);
+        return versionInfo;
+    }
+
+    BSONObj versionDoc = queryResults.front();
+    auto versionTypeResult = VersionType::fromBSON(versionDoc);
+    if (!versionTypeResult.isOK()) {
+        return Status(ErrorCodes::UnsupportedFormat,
+                      str::stream() << "invalid config version document: " << versionDoc
+                                    << versionTypeResult.getStatus().toString());
+    }
+
+    return versionTypeResult.getValue();
+}
+
+Status ShardingCatalogManagerImpl::_initConfigVersion(OperationContext* txn) {
+    auto versionStatus = _getConfigVersion(txn);
+    if (!versionStatus.isOK()) {
+        return versionStatus.getStatus();
+    }
+
+    auto versionInfo = versionStatus.getValue();
+    if (versionInfo.getMinCompatibleVersion() > CURRENT_CONFIG_VERSION) {
+        return {ErrorCodes::IncompatibleShardingConfigVersion,
+                str::stream() << "current version v" << CURRENT_CONFIG_VERSION
+                              << " is older than the cluster min compatible v"
+                              << versionInfo.getMinCompatibleVersion()};
+    }
+
+    if (versionInfo.getCurrentVersion() == UpgradeHistory_EmptyVersion) {
+        VersionType newVersion;
+        newVersion.setClusterId(OID::gen());
+        newVersion.setMinCompatibleVersion(MIN_COMPATIBLE_CONFIG_VERSION);
+        newVersion.setCurrentVersion(CURRENT_CONFIG_VERSION);
+
+        BSONObj versionObj(newVersion.toBSON());
+        auto insertStatus = _catalogClient->insertConfigDocument(
+            txn, VersionType::ConfigNS, versionObj, kNoWaitWriteConcern);
+
+        return insertStatus;
+    }
+
+    if (versionInfo.getCurrentVersion() == UpgradeHistory_UnreportedVersion) {
+        return {ErrorCodes::IncompatibleShardingConfigVersion,
+                "Assuming config data is old since the version document cannot be found in the "
+                "config server and it contains databases besides 'local' and 'admin'. "
+                "Please upgrade if this is the case. Otherwise, make sure that the config "
+                "server is clean."};
+    }
+
+    if (versionInfo.getCurrentVersion() < CURRENT_CONFIG_VERSION) {
+        return {ErrorCodes::IncompatibleShardingConfigVersion,
+                str::stream() << "need to upgrade current cluster version to v"
+                              << CURRENT_CONFIG_VERSION
+                              << "; currently at v"
+                              << versionInfo.getCurrentVersion()};
+    }
+
+    return Status::OK();
+}
+
+Status ShardingCatalogManagerImpl::_initConfigIndexes(OperationContext* txn) {
+    const bool unique = true;
+    auto configShard = Grid::get(txn)->shardRegistry()->getConfigShard();
+
+    Status result =
+        configShard->createIndexOnConfig(txn,
+                                         NamespaceString(ChunkType::ConfigNS),
+                                         BSON(ChunkType::ns() << 1 << ChunkType::min() << 1),
+                                         unique);
+    if (!result.isOK()) {
+        return Status(result.code(),
+                      str::stream() << "couldn't create ns_1_min_1 index on config db"
+                                    << causedBy(result));
+    }
+
+    result = configShard->createIndexOnConfig(
+        txn,
+        NamespaceString(ChunkType::ConfigNS),
+        BSON(ChunkType::ns() << 1 << ChunkType::shard() << 1 << ChunkType::min() << 1),
+        unique);
+    if (!result.isOK()) {
+        return Status(result.code(),
+                      str::stream() << "couldn't create ns_1_shard_1_min_1 index on config db"
+                                    << causedBy(result));
+    }
+
+    result = configShard->createIndexOnConfig(
+        txn,
+        NamespaceString(ChunkType::ConfigNS),
+        BSON(ChunkType::ns() << 1 << ChunkType::DEPRECATED_lastmod() << 1),
+        unique);
+    if (!result.isOK()) {
+        return Status(result.code(),
+                      str::stream() << "couldn't create ns_1_lastmod_1 index on config db"
+                                    << causedBy(result));
+    }
+
+    result = configShard->createIndexOnConfig(
+        txn, NamespaceString(ShardType::ConfigNS), BSON(ShardType::host() << 1), unique);
+    if (!result.isOK()) {
+        return Status(result.code(),
+                      str::stream() << "couldn't create host_1 index on config db"
+                                    << causedBy(result));
+    }
+
+    result = configShard->createIndexOnConfig(
+        txn, NamespaceString(LocksType::ConfigNS), BSON(LocksType::lockID() << 1), !unique);
+    if (!result.isOK()) {
+        return Status(result.code(),
+                      str::stream() << "couldn't create lock id index on config db"
+                                    << causedBy(result));
+    }
+
+    result =
+        configShard->createIndexOnConfig(txn,
+                                         NamespaceString(LocksType::ConfigNS),
+                                         BSON(LocksType::state() << 1 << LocksType::process() << 1),
+                                         !unique);
+    if (!result.isOK()) {
+        return Status(result.code(),
+                      str::stream() << "couldn't create state and process id index on config db"
+                                    << causedBy(result));
+    }
+
+    result = configShard->createIndexOnConfig(
+        txn, NamespaceString(LockpingsType::ConfigNS), BSON(LockpingsType::ping() << 1), !unique);
+    if (!result.isOK()) {
+        return Status(result.code(),
+                      str::stream() << "couldn't create lockping ping time index on config db"
+                                    << causedBy(result));
+    }
+
+    result = configShard->createIndexOnConfig(txn,
+                                              NamespaceString(TagsType::ConfigNS),
+                                              BSON(TagsType::ns() << 1 << TagsType::min() << 1),
+                                              unique);
+    if (!result.isOK()) {
+        return Status(result.code(),
+                      str::stream() << "couldn't create ns_1_min_1 index on config db"
+                                    << causedBy(result));
+    }
+
+    result = configShard->createIndexOnConfig(txn,
+                                              NamespaceString(TagsType::ConfigNS),
+                                              BSON(TagsType::ns() << 1 << TagsType::tag() << 1),
+                                              !unique);
+    if (!result.isOK()) {
+        return Status(result.code(),
+                      str::stream() << "couldn't create ns_1_tag_1 index on config db"
+                                    << causedBy(result));
+    }
+
+    return Status::OK();
 }
 
 }  // namespace mongo

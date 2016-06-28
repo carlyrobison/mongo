@@ -66,13 +66,17 @@
 #include "mongo/db/service_context.h"
 #include "mongo/db/storage/storage_engine.h"
 #include "mongo/executor/network_interface.h"
+#include "mongo/executor/network_interface_factory.h"
+#include "mongo/executor/thread_pool_task_executor.h"
 #include "mongo/s/balancer/balancer.h"
+#include "mongo/s/catalog/sharding_catalog_manager.h"
 #include "mongo/s/client/shard_registry.h"
 #include "mongo/s/grid.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/stdx/thread.h"
 #include "mongo/util/assert_util.h"
+#include "mongo/util/concurrency/thread_pool.h"
 #include "mongo/util/exit.h"
 #include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
@@ -122,6 +126,18 @@ MONGO_INITIALIZER(initialSyncOplogBuffer)(InitializerContext*) {
     return Status::OK();
 }
 
+/**
+ * Returns new thread pool for thread pool task executor.
+ */
+std::unique_ptr<ThreadPool> makeThreadPool() {
+    ThreadPool::Options threadPoolOptions;
+    threadPoolOptions.poolName = "replication";
+    threadPoolOptions.onCreateThread = [](const std::string& threadName) {
+        Client::initThread(threadName.c_str());
+    };
+    return stdx::make_unique<ThreadPool>(threadPoolOptions);
+}
+
 }  // namespace
 
 ReplicationCoordinatorExternalStateImpl::ReplicationCoordinatorExternalStateImpl()
@@ -136,22 +152,8 @@ bool ReplicationCoordinatorExternalStateImpl::isInitialSyncFlagSet(OperationCont
 void ReplicationCoordinatorExternalStateImpl::startInitialSync(OnInitialSyncFinishedFn finished) {
     _initialSyncThread.reset(new stdx::thread{[finished, this]() {
         Client::initThreadIfNotAlready("initial sync");
-
-        // "_bgSync" should not be initialized before this.
-        invariant(!_bgSync);
-        {
-            auto txn = cc().makeOperationContext();
-            invariant(txn);
-            invariant(txn->getClient());
-            log() << "Starting replication fetcher thread";
-
-            // Start bgsync.
-            _bgSync.reset(new BackgroundSync(this, makeSteadyStateOplogBuffer(txn.get())));
-            _bgSync->startup(txn.get());
-        }
-
         // Do initial sync.
-        syncDoInitialSync(_bgSync.get());
+        syncDoInitialSync(this);
         finished();
     }});
 }
@@ -168,18 +170,18 @@ void ReplicationCoordinatorExternalStateImpl::runOnInitialSyncThread(
 }
 
 void ReplicationCoordinatorExternalStateImpl::startSteadyStateReplication(OperationContext* txn) {
-    if (!_bgSync) {
-        log() << "Starting replication fetcher thread";
-        _bgSync.reset(new BackgroundSync(this, makeSteadyStateOplogBuffer(txn)));
-        _bgSync->startup(txn);
-    }
+    invariant(!_bgSync);
+    log() << "Starting replication fetcher thread";
+    _bgSync = stdx::make_unique<BackgroundSync>(this, makeSteadyStateOplogBuffer(txn));
+    _bgSync->startup(txn);
+
     log() << "Starting replication applier threads";
     invariant(!_applierThread);
     _applierThread.reset(new stdx::thread(stdx::bind(&runSyncThread, _bgSync.get())));
     log() << "Starting replication reporter thread";
     invariant(!_syncSourceFeedbackThread);
-    _syncSourceFeedbackThread.reset(new stdx::thread(
-        stdx::bind(&SyncSourceFeedback::run, &_syncSourceFeedback, _bgSync.get())));
+    _syncSourceFeedbackThread.reset(new stdx::thread(stdx::bind(
+        &SyncSourceFeedback::run, &_syncSourceFeedback, _taskExecutor.get(), _bgSync.get())));
 }
 
 void ReplicationCoordinatorExternalStateImpl::startThreads(const ReplSettings& settings) {
@@ -192,6 +194,10 @@ void ReplicationCoordinatorExternalStateImpl::startThreads(const ReplSettings& s
         _snapshotThread = SnapshotThread::start(getGlobalServiceContext());
     }
     getGlobalServiceContext()->getGlobalStorageEngine()->setJournalListener(this);
+
+    _taskExecutor = stdx::make_unique<executor::ThreadPoolTaskExecutor>(
+        makeThreadPool(), executor::makeNetworkInterface("NetworkInterfaceASIO-RS"));
+    _taskExecutor->startup();
 
     _writerPool = SyncTail::makeWriterPool();
 
@@ -220,7 +226,14 @@ void ReplicationCoordinatorExternalStateImpl::shutdown(OperationContext* txn) {
         }
         if (_snapshotThread)
             _snapshotThread->shutdown();
+
+        _taskExecutor->shutdown();
+        _taskExecutor->join();
     }
+}
+
+executor::TaskExecutor* ReplicationCoordinatorExternalStateImpl::getTaskExecutor() const {
+    return _taskExecutor.get();
 }
 
 Status ReplicationCoordinatorExternalStateImpl::initializeReplSetStorage(OperationContext* txn,
@@ -458,6 +471,21 @@ void ReplicationCoordinatorExternalStateImpl::shardingOnDrainingStateHook(Operat
     }
 
     if (serverGlobalParams.clusterRole == ClusterRole::ConfigServer) {
+        status = Grid::get(txn)->catalogManager()->initializeConfigDatabaseIfNeeded(txn);
+        if (!status.isOK()) {
+            if (status == ErrorCodes::ShutdownInProgress ||
+                status == ErrorCodes::InterruptedAtShutdown) {
+                // Don't fassert if we're mid-shutdown, let the shutdown happen gracefully.
+                return;
+            }
+            fassertFailedWithStatus(40184,
+                                    Status(status.code(),
+                                           str::stream()
+                                               << "Failed to initialize config database on config "
+                                                  "server's first transition to primary"
+                                               << causedBy(status)));
+        }
+
         // If this is a config server node becoming a primary, start the balancer
         auto balancer = Balancer::get(txn);
 

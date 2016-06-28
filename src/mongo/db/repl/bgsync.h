@@ -38,7 +38,6 @@
 #include "mongo/db/repl/oplog_fetcher.h"
 #include "mongo/db/repl/optime.h"
 #include "mongo/db/repl/sync_source_resolver.h"
-#include "mongo/executor/thread_pool_task_executor.h"
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/stdx/mutex.h"
@@ -85,6 +84,11 @@ public:
      */
     void join(OperationContext* txn);
 
+    /**
+     * Returns true if shutdown() has been called.
+     */
+    bool inShutdown() const;
+
     bool isStopped() const;
 
     // starts the sync target notifying thread
@@ -123,6 +127,8 @@ public:
     void pushTestOpToBuffer(OperationContext* txn, const BSONObj& op);
 
 private:
+    bool _inShutdown_inlock() const;
+
     /**
      * Starts the producer thread which runs until shutdown. Upon resolving the current sync source
      * the producer thread uses the OplogFetcher (which requires the replication coordinator
@@ -172,9 +178,6 @@ private:
     // Production thread
     std::unique_ptr<OplogBuffer> _oplogBuffer;
 
-    // Task executor used to run find/getMore commands on sync source.
-    executor::ThreadPoolTaskExecutor _threadPoolTaskExecutor;
-
     // A pointer to the replication coordinator running the show.
     ReplicationCoordinator* _replCoord;
 
@@ -196,6 +199,9 @@ private:
 
     // Thread running producerThread().
     std::unique_ptr<stdx::thread> _producerThread;
+
+    // Set to true if shutdown() has been called.
+    bool _inShutdown = false;
 
     // if producer thread should not be running
     bool _stopped = true;
