@@ -47,11 +47,18 @@
 #include "mongo/db/operation_context.h"
 #include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/pipeline.h"
+#include "mongo/db/server_parameters.h"
 #include "mongo/db/storage/record_data.h"
 #include "mongo/db/views/view.h"
 #include "mongo/util/log.h"
 
+namespace {
+bool enableViews = false;
+}  // namespace
+
 namespace mongo {
+ExportedServerParameter<bool, ServerParameterType::kStartupOnly> enableViewsParameter(
+    ServerParameterSet::getGlobal(), "enableViews", &enableViews);
 
 const std::uint32_t ViewCatalog::kMaxViewDepth = 20;
 
@@ -85,6 +92,7 @@ Status ViewCatalog::createView(OperationContext* txn,
                                const NamespaceString& viewName,
                                const std::string& viewOn,
                                const BSONObj& pipeline) {
+    uassert(40188, "View support not enabled", enableViews);
     NamespaceString viewNss(viewName.db(), viewOn);
     if (lookup(StringData(viewName.ns()))) {
         LOG(3) << "VIEWS: Attempted to create a duplicate view";

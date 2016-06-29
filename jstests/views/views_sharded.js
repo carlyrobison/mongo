@@ -3,7 +3,8 @@
 (function() {
     "use strict";
 
-    var st = new ShardingTest({name: "views_sharded", shards: 2});
+    var st = new ShardingTest(
+        {name: "views_sharded", shards: 2, other: {shardOptions: {setParameter: "enableViews=1"}}});
 
     var mongos = st.s;
     var config = mongos.getDB("config");

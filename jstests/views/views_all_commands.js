@@ -10,10 +10,11 @@
         else {
             assert.commandFailed(res);
             switch (res.code) {
-                case 160:  // ViewRecursionLimitExceeded
-                case 161:  // CommandNotSupportedOnView
-                case 162:  // OptionNotSupportedOnView
-                case 164:  // ViewMustRunOnMongos
+                case ErrorCodes.ViewRecursionLimitExceeded:
+                case ErrorCodes.CommandNotSupportedOnView:
+                case ErrorCodes.OptionNotSupportedOnView:
+                case ErrorCodes.InvalidPipelineOperator:
+                case ErrorCodes.ViewMustRunOnMongos:
                     break;
                 default:
                     assert(
