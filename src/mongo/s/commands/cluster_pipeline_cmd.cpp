@@ -101,6 +101,27 @@ public:
         return Pipeline::checkAuthForCommand(client, dbname, cmdObj);
     }
 
+
+    StatusWith<BSONObj> convertViewToAgg(OperationContext* txn,
+                                         StringData resolvedViewNs,
+                                         const std::vector<BSONElement>& resolvedViewPipeline,
+                                         const BSONObj& cmdObj,
+                                         bool isExplain) {
+        NamespaceString nss(resolvedViewNs);
+
+        auto request = AggregationRequest::parseFromBSON(nss, cmdObj);
+        if (!request.isOK()) {
+            return request.getStatus();
+        }
+
+        // Status viewValidationStatus = request->validateForView();
+        // if (!viewValidationStatus.isOK()) {
+        //     return viewValidationStatus;
+        // }
+
+        return request.getValue().asExpandedViewAggregation(resolvedViewPipeline);
+    }
+
     virtual bool run(OperationContext* txn,
                      const std::string& dbname,
                      BSONObj& cmdObj,
@@ -123,20 +144,21 @@ public:
                         pipeline.push_back(item.Obj().getOwned());
                     }
 
-                    BSONObj match = ViewDefinition::pipelineToViewAggregation(
-                        viewDef["ns"].str(), pipeline, cmdObj);
+                    StatusWith<BSONObj> match = convertViewToAgg(txn,
+                                                                 viewDef["ns"].valueStringData(),
+                                                                 viewDef["pipeline"].Array(),
+                                                                 cmdObj,
+                                                                 false);
 
-                    if (!match.isEmpty()) {
+                    if (match.isOK()) {
                         result.resetToEmpty();
                         Command* c = Command::findCommand("aggregate");
-                        bool retval = c->run(txn, dbname, match, options, errmsg, result);
+                        bool retval =
+                            c->run(txn, dbname, match.getValue(), options, errmsg, result);
                         return retval;
                     }
 
-                    return appendCommandStatus(
-                        result,
-                        {ErrorCodes::OptionNotSupportedOnView,
-                         str::stream() << "One or more option not supported on views."});
+                    return appendCommandStatus(result, match.getStatus());
                 }
             }
         }

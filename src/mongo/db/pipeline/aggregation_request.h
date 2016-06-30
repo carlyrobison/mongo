@@ -111,6 +111,8 @@ public:
         return _collation;
     }
 
+    BSONObj asExpandedViewAggregation(const std::vector<BSONElement>& resolvedViewPipeline) const;
+
     //
     // Setters for optional fields.
     //

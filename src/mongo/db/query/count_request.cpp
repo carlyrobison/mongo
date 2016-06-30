@@ -90,6 +90,10 @@ StatusWith<CountRequest> CountRequest::parseFromBSON(const std::string& dbname,
         return Status(ErrorCodes::InvalidNamespace, "invalid collection name");
     }
 
+    return CountRequest::parseFromBSON(nss, cmdObj);
+}
+
+StatusWith<CountRequest> CountRequest::parseFromBSON(NamespaceString nss, const BSONObj& cmdObj) {
     // We don't validate that "query" is a nested object due to SERVER-15456.
     CountRequest request(std::move(nss), cmdObj.getObjectField(kQueryField));
 
