@@ -31,9 +31,11 @@
 #include <vector>
 
 #include "mongo/db/commands.h"
+#include "mongo/db/query/count_request.h"
 #include "mongo/s/commands/cluster_commands_common.h"
 #include "mongo/s/commands/cluster_explain.h"
 #include "mongo/s/commands/strategy.h"
+#include "mongo/s/query/cluster_view_util.h"
 #include "mongo/util/timer.h"
 
 namespace mongo {
@@ -95,12 +97,72 @@ public:
         out->push_back(Privilege(parseResourcePattern(dbname, cmdObj), actions));
     }
 
+    StatusWith<BSONObj> convertViewToAgg(OperationContext* txn,
+                                         StringData resolvedViewNs,
+                                         const std::vector<BSONElement>& resolvedViewPipeline,
+                                         const BSONObj& cmdObj,
+                                         bool isExplain) {
+        NamespaceString nss(resolvedViewNs);
+
+        auto request = CountRequest::parseFromBSON(nss, cmdObj);
+        if (!request.isOK()) {
+            return request.getStatus();
+        }
+
+        auto qr = QueryRequest::makeFromCountRequest(request.getValue(), isExplain);
+        Status viewValidationStatus = qr->validateForView();
+        if (!viewValidationStatus.isOK()) {
+            return viewValidationStatus;
+        }
+
+        return qr->asExpandedViewAggregation("count", resolvedViewPipeline);
+    }
+
     virtual bool run(OperationContext* txn,
                      const std::string& dbname,
                      BSONObj& cmdObj,
                      int options,
                      std::string& errmsg,
                      BSONObjBuilder& result) {
+        auto ok = runExec(txn, dbname, cmdObj, options, errmsg, result);
+        if (!ok) {
+            BSONObj tmp = result.asTempObj();
+            if (tmp.hasField("code")) {
+                auto codeElement = tmp.getField("code");
+                auto code = codeElement.Int();
+
+                if (code == ErrorCodes::ViewMustRunOnMongos) {
+                    auto viewDef = ClusterViewDecoration::getResolvedView(txn);
+                    invariant(!viewDef.isEmpty());
+
+                    StatusWith<BSONObj> match = convertViewToAgg(txn,
+                                                                 viewDef["ns"].valueStringData(),
+                                                                 viewDef["pipeline"].Array(),
+                                                                 cmdObj,
+                                                                 false);
+                    if (match.isOK()) {
+                        result.resetToEmpty();
+
+                        Command* c = Command::findCommand("aggregate");
+                        bool retval =
+                            c->run(txn, dbname, match.getValue(), options, errmsg, result);
+                        return retval;
+                    }
+
+                    return appendCommandStatus(result, match.getStatus());
+                }
+            }
+        }
+
+        return ok;
+    }
+
+    bool runExec(OperationContext* txn,
+                 const std::string& dbname,
+                 BSONObj& cmdObj,
+                 int options,
+                 std::string& errmsg,
+                 BSONObjBuilder& result) {
         const NamespaceString nss(parseNs(dbname, cmdObj));
         uassert(
             ErrorCodes::InvalidNamespace, "count command requires valid namespace", nss.isValid());
@@ -156,6 +218,7 @@ public:
         Strategy::commandOp(
             txn, dbname, countCmdBuilder.done(), options, nss.ns(), filter, &countResult);
 
+
         long long total = 0;
         BSONObjBuilder shardSubTotal(result.subobjStart("shards"));
 
@@ -178,6 +241,11 @@ public:
                 // can be accounted to a single error
                 int code = getUniqueCodeFromCommandResults(countResult);
                 if (code != 0) {
+                    if (code == ErrorCodes::ViewMustRunOnMongos) {
+                        ClusterViewDecoration::setResolvedView(
+                            txn, iter->result.getObjectField("resolvedView"));
+                    }
+
                     result.append("code", code);
                 }
 

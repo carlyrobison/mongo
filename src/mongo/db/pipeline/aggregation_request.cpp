@@ -139,6 +139,45 @@ StatusWith<AggregationRequest> AggregationRequest::parseFromBSON(NamespaceString
     return request;
 }
 
+BSONObj AggregationRequest::asExpandedViewAggregation(
+    const std::vector<BSONElement>& resolvedViewPipeline) const {
+    BSONObjBuilder b;
+    b.append("aggregate", _nss.coll());
+
+    BSONArrayBuilder pipeline;
+    for (auto&& item : resolvedViewPipeline) {
+        pipeline.append(item);
+    }
+
+    for (auto&& item : _pipeline) {
+        pipeline.append(item);
+    }
+
+    b.append("pipeline", pipeline.arr());
+
+    // TODO: Add cursor management to AggregationRequest.
+
+    // if (_batchSize) {
+    //     b.append("cursor", BSON(kBatchSizeField << *_batchSize));
+    // } else {
+    //     if (cmd.empty()) {
+    //         b.append("cursor", BSONObj());
+    //     }
+    // }
+
+    b.append("cursor", BSONObj());
+
+    if (_explain) {
+        b.append("explain", _explain);
+    }
+
+    // if (_maxTimeMS > 0) {
+    //     b.append(cmdOptionMaxTimeMS, _maxTimeMS);
+    // }
+
+    return b.obj();
+}
+
 Document AggregationRequest::serializeToCommandObj() const {
     MutableDocument serialized;
     return Document{{kCommandName, _nss.coll()},

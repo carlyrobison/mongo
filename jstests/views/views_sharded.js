@@ -21,20 +21,17 @@
     assert.commandWorked(
         db.adminCommand({moveChunk: coll.getFullName(), find: {a: 25}, to: "shard0001"}));
 
-    for (var i = 0; i < 20; ++i) {
-        coll.insert({a: i % 2});
+    for (var i = 0; i < 10; ++i) {
+        coll.insert({a: i});
     }
 
-    assert.commandWorked(db.createView("even_numbers", coll.getName(), [{$match: {a: 0}}]));
-    var view = db.getCollection("even_numbers");
+    assert.commandWorked(db.createView("view", coll.getName(), [{$match: {a: {$gte: 5}}}]));
+    var view = db.getCollection("view");
 
-    assert.eq(10, view.find({}).itcount());
-    assert.eq(10, view.aggregate([{$match: {a: {$gte: 0}}}]).itcount());
-    // TODO: Fix distinct
-    // assert.eq([0], view.distinct("a", {a: {$gte: 0}}));
-
-    // TODO: Fix count
-    // assert.eq(10, view.count({a: {$gte: 0}}));
+    assert.eq(3, view.find({a: {$lte: 7}}).itcount());
+    assert.eq(3, view.aggregate([{$match: {a: {$lte: 7}}}]).itcount());
+    assert.eq([5, 6, 7], view.distinct("a", {a: {$lte: 7}}).sort());
+    assert.eq(3, view.count({a: {$lte: 7}}));
 
     // TODO: Add explain tests
 })();

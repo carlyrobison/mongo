@@ -46,7 +46,7 @@ BSONObj ClusterViewDecoration::getResolvedView(OperationContext* txn) {
 }
 
 void ClusterViewDecoration::setResolvedView(OperationContext* txn, BSONObj resolvedView) {
-    resolvedViewDecoration(txn) = resolvedView;
+    resolvedViewDecoration(txn) = resolvedView.getOwned();
 }
 
 }  // namespace mongo

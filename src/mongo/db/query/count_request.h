@@ -97,6 +97,11 @@ public:
      */
     static StatusWith<CountRequest> parseFromBSON(const std::string& dbname, const BSONObj& cmdObj);
 
+    /**
+     * Construct a CountRequest from the command specification and namespace.
+     */
+    static StatusWith<CountRequest> parseFromBSON(NamespaceString nss, const BSONObj& cmdObj);
+
 private:
     // Namespace to operate on (e.g. "foo.bar").
     const NamespaceString _nss;
