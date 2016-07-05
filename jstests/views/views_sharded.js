@@ -30,9 +30,13 @@
 
     assert.eq(3, view.find({a: {$lte: 7}}).itcount());
     assert.eq(3, view.aggregate([{$match: {a: {$lte: 7}}}]).itcount());
-    // TODO: Use runCommand
-    // assert.eq([5, 6, 7], view.distinct("a", {a: {$lte: 7}}).sort());
     assert.eq(3, view.count({a: {$lte: 7}}));
+
+    var result = db.runCommand({distinct: "view", key: "a", query: {a: {$lte: 7}}});
+    jsTest.log(tojson(result));
+    assert.commandWorked(result);
+    assert.eq([5, 6, 7], result.result[0].a.sort());
+    
 
     // TODO: Add explain tests
 })();
