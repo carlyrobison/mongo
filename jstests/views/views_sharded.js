@@ -33,7 +33,6 @@
     assert.eq(3, view.count({a: {$lte: 7}}));
 
     var result = db.runCommand({distinct: "view", key: "a", query: {a: {$lte: 7}}});
-    jsTest.log(tojson(result));
     assert.commandWorked(result);
     assert.eq([5, 6, 7], result.result[0].a.sort());
     
