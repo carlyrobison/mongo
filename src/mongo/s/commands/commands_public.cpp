@@ -1112,11 +1112,11 @@ public:
                                          StringData resolvedViewNs,
                                          const std::vector<BSONElement>& resolvedViewPipeline,
                                          const BSONObj& cmdObj,
-                                         bool isExplain) {
+                                         bool isExplain) const {
         NamespaceString nss(resolvedViewNs);
 
         auto parsedDistinct =
-            ParsedDistinct::parse(txn, nss, cmdObj, ExtensionsCallbackNoop(), false);
+            ParsedDistinct::parse(txn, nss, cmdObj, ExtensionsCallbackNoop(), isExplain);
         if (!parsedDistinct.isOK()) {
             return parsedDistinct.getStatus();
         }
@@ -1275,8 +1275,35 @@ public:
 
         const char* mongosStageName = ClusterExplain::getStageNameForReadOp(shardResults, cmdObj);
 
-        return ClusterExplain::buildExplainResult(
+        auto status = ClusterExplain::buildExplainResult(
             txn, shardResults, mongosStageName, millisElapsed, out);
+
+        if (status == ErrorCodes::ViewMustRunOnMongos) {
+            auto viewDef = ClusterViewDecoration::getResolvedView(txn);
+            invariant(!viewDef.isEmpty());
+
+            auto aggCmd = convertViewToAgg(
+                txn, viewDef["ns"].valueStringData(), viewDef["pipeline"].Array(), cmdObj, true);
+
+            if (aggCmd.isOK()) {
+                out->resetToEmpty();
+                Command* c = Command::findCommand("aggregate");
+                int queryOptions = 0;  // TODO: Is this correct?
+                std::string errMsg;
+                bool retval = c->run(txn, dbname, aggCmd.getValue(), queryOptions, errMsg, *out);
+
+                if (retval) {
+                    return Status::OK();
+                }
+
+                BSONObj tmp = out->asTempObj();
+                return {ErrorCodes::fromInt(tmp["code"].numberInt()), tmp["errmsg"]};
+            }
+
+            return aggCmd.getStatus();
+        }
+
+        return status;
     }
 } disinctCmd;
 

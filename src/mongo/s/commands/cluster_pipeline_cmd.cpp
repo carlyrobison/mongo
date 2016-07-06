@@ -105,8 +105,7 @@ public:
     StatusWith<BSONObj> convertViewToAgg(OperationContext* txn,
                                          StringData resolvedViewNs,
                                          const std::vector<BSONElement>& resolvedViewPipeline,
-                                         const BSONObj& cmdObj,
-                                         bool isExplain) {
+                                         const BSONObj& cmdObj) {
         NamespaceString nss(resolvedViewNs);
 
         auto request = AggregationRequest::parseFromBSON(nss, cmdObj);
@@ -144,11 +143,8 @@ public:
                         pipeline.push_back(item.Obj().getOwned());
                     }
 
-                    StatusWith<BSONObj> match = convertViewToAgg(txn,
-                                                                 viewDef["ns"].valueStringData(),
-                                                                 viewDef["pipeline"].Array(),
-                                                                 cmdObj,
-                                                                 false);
+                    StatusWith<BSONObj> match = convertViewToAgg(
+                        txn, viewDef["ns"].valueStringData(), viewDef["pipeline"].Array(), cmdObj);
 
                     if (match.isOK()) {
                         result.resetToEmpty();

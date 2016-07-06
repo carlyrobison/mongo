@@ -119,15 +119,42 @@ public:
             return qr.getStatus();
         }
 
-        return Strategy::explainFind(
+        auto result = Strategy::explainFind(
             txn, cmdObj, *qr.getValue(), verbosity, serverSelectionMetadata, out);
+
+        if (result == ErrorCodes::ViewMustRunOnMongos) {
+            auto viewDef = ClusterViewDecoration::getResolvedView(txn);
+            invariant(!viewDef.isEmpty());
+
+            auto aggCmd = convertViewToAgg(
+                txn, viewDef["ns"].valueStringData(), viewDef["pipeline"].Array(), cmdObj, true);
+
+            if (aggCmd.isOK()) {
+                out->resetToEmpty();
+                Command* c = Command::findCommand("aggregate");
+                int queryOptions = 0;  // TODO: Is this correct?
+                std::string errMsg;
+                bool retval = c->run(txn, dbname, aggCmd.getValue(), queryOptions, errMsg, *out);
+
+                if (retval) {
+                    return Status::OK();
+                }
+
+                BSONObj tmp = out->asTempObj();
+                return {ErrorCodes::fromInt(tmp["code"].numberInt()), tmp["errmsg"]};
+            }
+
+            return aggCmd.getStatus();
+        }
+
+        return result;
     }
 
     StatusWith<BSONObj> convertViewToAgg(OperationContext* txn,
                                          StringData resolvedViewNs,
                                          const std::vector<BSONElement>& resolvedViewPipeline,
                                          const BSONObj& cmdObj,
-                                         bool isExplain) {
+                                         bool isExplain) const {
         NamespaceString nss(resolvedViewNs);
 
         auto qrStatus = QueryRequest::makeFromFindCommand(nss, cmdObj, isExplain);
@@ -172,20 +199,20 @@ public:
                     auto viewDef = ClusterViewDecoration::getResolvedView(txn);
                     invariant(!viewDef.isEmpty());
 
-                    auto match = convertViewToAgg(txn,
-                                                  viewDef["ns"].valueStringData(),
-                                                  viewDef["pipeline"].Array(),
-                                                  cmdObj,
-                                                  false);
-                    if (match.isOK()) {
+                    auto aggCmd = convertViewToAgg(txn,
+                                                   viewDef["ns"].valueStringData(),
+                                                   viewDef["pipeline"].Array(),
+                                                   cmdObj,
+                                                   false);
+                    if (aggCmd.isOK()) {
                         result.resetToEmpty();
                         Command* c = Command::findCommand("aggregate");
                         bool retval =
-                            c->run(txn, dbname, match.getValue(), options, errmsg, result);
+                            c->run(txn, dbname, aggCmd.getValue(), options, errmsg, result);
                         return retval;
                     }
 
-                    return appendCommandStatus(result, match.getStatus());
+                    return appendCommandStatus(result, aggCmd.getStatus());
                 }
             }
         }

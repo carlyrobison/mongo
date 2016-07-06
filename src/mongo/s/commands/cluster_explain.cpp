@@ -33,6 +33,7 @@
 #include "mongo/s/client/shard_registry.h"
 #include "mongo/s/commands/cluster_explain.h"
 #include "mongo/s/grid.h"
+#include "mongo/s/query/cluster_view_util.h"
 
 namespace mongo {
 
@@ -350,6 +351,11 @@ Status ClusterExplain::buildExplainResult(OperationContext* txn,
     // Explain only succeeds if all shards support the explain command.
     Status validateStatus = ClusterExplain::validateShardResults(shardResults);
     if (!validateStatus.isOK()) {
+        if (validateStatus == ErrorCodes::ViewMustRunOnMongos) {
+            ClusterViewDecoration::setResolvedView(
+                txn, shardResults[0].result.getObjectField("resolvedView"));
+        }
+
         return validateStatus;
     }
 
