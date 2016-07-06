@@ -36,8 +36,6 @@
 
 namespace mongo {
 
-using mongo::OperationContext;
-
 TimeSeriesBatch::TimeSeriesBatch(const BSONObj& batchDocument) {
     BSONObj batchDoc = batchDocument.getOwned();
     // Create a map entry for each doc in the docs subarray.
@@ -165,116 +163,126 @@ batchIdType TimeSeriesBatch::_thisBatchId() {
 // }
 
 
-TimeSeriesBatchManager::TimeSeriesBatchManager(StringData db, StringData coll) {
+TimeSeriesCache::TimeSeriesCache(StringData db, StringData coll) {
     _db = db;
     _coll = coll;
 }
 
-void TimeSeriesBatchManager::insert(const BSONObj& doc) {
+void TimeSeriesCache::insert(const BSONObj& doc) {
 	Date_t date = doc.getField("_id").Date();
 
     batchIdType batchId = _getBatchId(date);
 
     // Check if the batch exists. If it doesn't, make one. If it does, use the existing one.
-    if (_loadedBatches.find(batchId) == _loadedBatches.end()) {
+    if (_cache.find(batchId) == _cache.end()) {
     	// Batch does not exist, create one.
     	TimeSeriesBatch batch(batchId);
-    	_loadedBatches[batchId] = batch;
+    	_cache[batchId] = batch;
     }
     
-    TimeSeriesBatch& batch = _loadedBatches[batchId];
+    TimeSeriesBatch& batch = _cache[batchId];
 
     batch.insert(doc);
 }
 
-void TimeSeriesBatchManager::loadBatch(const BSONObj& doc) {
+void TimeSeriesCache::loadBatch(const BSONObj& doc) {
     batchIdType batchId = doc["_id"].numberLong();
 
     // Check that the batch id doesn't already exist in memory.
     uassert(40155, "Cannot load a batch that already exists.",
-        _loadedBatches.find(batchId) == _loadedBatches.end());
+        _cache.find(batchId) == _cache.end());
 
-    _loadedBatches[batchId] = TimeSeriesBatch(doc);
+    _cache[batchId] = TimeSeriesBatch(doc);
 }
 
-void TimeSeriesBatchManager::update(const BSONObj& doc) {
+void TimeSeriesCache::update(const BSONObj& doc) {
 	Date_t date = doc.getField("_id").Date();
 
 	batchIdType batchId = _getBatchId(date);
 
 	// Assert that the batch exists.
 	uassert(BATCH_NONEXISTENT, "Cannot update a document in a batch that does not exist",
-		_loadedBatches.find(batchId) != _loadedBatches.end());
+		_cache.find(batchId) != _cache.end());
     
-    TimeSeriesBatch& batch = _loadedBatches[batchId];
+    TimeSeriesBatch& batch = _cache[batchId];
 
     batch.update(doc);
 }
 
-BSONObj TimeSeriesBatchManager::retrieve(const Date_t& time) {
+BSONObj TimeSeriesCache::retrieve(const Date_t& time) {
     batchIdType batchId = _getBatchId(time);
 
 	// Assert that the batch exists.
     uassert(BATCH_NONEXISTENT, "Cannot retrieve from a batch that doesn't exist.",
-    	_loadedBatches.find(batchId) != _loadedBatches.end());
+    	_cache.find(batchId) != _cache.end());
 
-    TimeSeriesBatch& batch = _loadedBatches[batchId];
+    TimeSeriesBatch& batch = _cache[batchId];
 
     return batch.retrieve(time);
 }
 
-BSONObj TimeSeriesBatchManager::retrieveBatch(const Date_t& time) {
+BSONObj TimeSeriesCache::retrieveBatch(const Date_t& time) {
     batchIdType batchId = _getBatchId(time);
 
 	// Assert that the batch exists.
     uassert(BATCH_NONEXISTENT, "Cannot retrieve a batch that doesn't exist.",
-    	_loadedBatches.find(batchId) != _loadedBatches.end());
+    	_cache.find(batchId) != _cache.end());
 
-    TimeSeriesBatch& batch = _loadedBatches[batchId];
+    TimeSeriesBatch& batch = _cache[batchId];
 
     return batch.retrieveBatch();
 }
 
-void TimeSeriesBatchManager::remove(const Date_t& time) {
+void TimeSeriesCache::remove(const Date_t& time) {
     batchIdType batchId = _getBatchId(time);
 
 	// Assert that the batch exists.
     uassert(BATCH_NONEXISTENT, "Cannot delete from a batch that doesn't exist.",
-    	_loadedBatches.find(batchId) != _loadedBatches.end());
+    	_cache.find(batchId) != _cache.end());
 
-    TimeSeriesBatch& batch = _loadedBatches[batchId];
+    TimeSeriesBatch& batch = _cache[batchId];
 
     return batch.remove(time);
 }
 
-void TimeSeriesBatchManager::removeBatch(const Date_t& time) {
+void TimeSeriesCache::removeBatch(const Date_t& time) {
 	batchIdType batchId = _getBatchId(time);
 
 	// Assert that the batch exists.
     uassert(BATCH_NONEXISTENT, "Cannot delete a batch that doesn't exist.",
-    	_loadedBatches.find(batchId) != _loadedBatches.end());
+    	_cache.find(batchId) != _cache.end());
 
     // TODO: gracefully close the batch, i.e. freeing memory we used?
-    _loadedBatches.erase(batchId);
+    _cache.erase(batchId);
 }
 
-bool TimeSeriesBatchManager::saveBatch(const Date_t& time){
+bool TimeSeriesCache::saveBatch(const Date_t& time){
     batchIdType batchId = _getBatchId(time);
 
     // Assert that the batch exists
     uassert(BATCH_NONEXISTENT, "Cannot save a batch that doesn't exist.",
-        _loadedBatches.find(batchId) != _loadedBatches.end());
+        _cache.find(batchId) != _cache.end());
 
-    //TimeSeriesBatch& batch = _loadedBatches[batchId];
+    //TimeSeriesBatch& batch = _cache[batchId];
 
     // Assert that the batch manager has a collection to save to
-    //fassert(0000, (_db != NULL) && (_coll != NULL));
+    //massert(0000, (_db != NULL) && (_coll != NULL));
 
     //return batch.save(_db, _coll);
     return false;
 }
 
-batchIdType TimeSeriesBatchManager::_getBatchId(const Date_t& time) {
+batchIdType TimeSeriesCache::evictBatch() {
+    // Step 1: Choose the least recently used batch to evict.
+    massert(000, "Empty cache", !_lruQueue.empty());
+
+    // Step 2: save the batch to the underlying collection
+
+    // Return the batchIdType
+    return 0;
+}
+
+batchIdType TimeSeriesCache::_getBatchId(const Date_t& time) {
 	long long millis = time.toMillisSinceEpoch();
 
 	batchIdType id = millis / NUM_MILLIS_IN_BATCH;
@@ -282,6 +290,4 @@ batchIdType TimeSeriesBatchManager::_getBatchId(const Date_t& time) {
 	return id;
 }
 
-// careful with this one: it's for testing
-TimeSeriesBatchManager _globalTimeSeriesBatchManager;
 }

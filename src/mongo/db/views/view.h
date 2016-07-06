@@ -83,6 +83,11 @@ public:
         return _pipeline;
     }
 
+    /* Some types of views are writable. */
+    bool isWritable(){
+        return isTimeSeries();
+    }
+
     bool isTimeSeries() {
         return _timeseries;
     }
@@ -109,8 +114,8 @@ public:
         return ss;
     }
 
-    TimeSeriesBatchManager *getTSManager() {
-        return tsManager;
+    TimeSeriesCache *getTSCache() {
+        return tsCache;
     }
 
 private:
@@ -120,7 +125,7 @@ private:
         _backingViewName;   // The namespace of the view/collection upon which the view is based.
     std::vector<BSONObj> _pipeline;
     bool _timeseries; // True if the view is a timeseries view
-    TimeSeriesBatchManager *tsManager; // Exists if the timeseries exists
+    TimeSeriesCache *tsCache; // Exists if the timeseries exists
 
 };
 }  // namespace mongo

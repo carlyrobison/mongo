@@ -35,12 +35,10 @@
 #include "mongo/util/assert_util.h"
 #include "mongo/base/status.h"
 #include "mongo/base/string_data.h"
-#include "mongo/db/commands.h"
-#include "mongo/db/service_context.h"
-#include "mongo/db/client.h"
 
 #include <string>
 #include <assert.h>
+#include <queue>
 
 #pragma once
 
@@ -58,7 +56,7 @@ static const int BATCH_NONEXISTENT = 40154;
 /**
  * Represents a single time series batch.
  *
- * It supports CRUD operations for documents falling in this time series interval.
+ * It will support CRUD operations for documents falling in this time series interval.
  * The document it represents is as follows:
  * {
  *     _id: <id containing timestamp>,
@@ -115,6 +113,7 @@ public:
 private:
     batchIdType _batchId;
 
+    /* batch should own the docs so use emplace */
     std::map<Date_t, BSONObj> _docs;
 
     // BSONObj _constructUpsertCommand(StringData collName);
@@ -124,11 +123,11 @@ private:
 /**
  * Manages multiple time series batches in memory.
  */
-class TimeSeriesBatchManager {
+class TimeSeriesCache {
 public:
-    TimeSeriesBatchManager() = default;
+    TimeSeriesCache() = default;
 
-    TimeSeriesBatchManager(StringData db, StringData coll);
+    TimeSeriesCache(StringData db, StringData coll);
 
     /* Inserts a document into the corresponding batch */
     void insert(const BSONObj& doc);
@@ -149,27 +148,36 @@ public:
 
     void removeBatch(const Date_t& time);
 
-    bool saveBatch(const Date_t& time); // Saves a specific batch to
-    // the backing collection
+    /**
+     * Saves a specific batch to the backing collection
+     */
+    bool saveBatch(const Date_t& time);
 
-    // When trying to get rid of TS Manager, save everything to the collection
-    // ~TimeSeriesBatchManager();
+    // When trying to get rid of TS Cache, save everything to the collection
+    // ~TimeSeriesCache();
+
+private:
+    /* Eviction methods that should not be able to be called by external classes */
+
+    /* Evicts a batch and saves it to the backing collection in doing so.
+     * Returns the batch Id of the cache that was evicted. Uses an LRU algorithm */
+    batchIdType evictBatch();
+
+    /* Linked list for LRU part of cache */
+    std::queue<batchIdType> _lruQueue;
+
 
 private:
     /* Converts a date to the corresponding batch id number */
     batchIdType _getBatchId(const Date_t& time);
 
     /* Map of batch IDs to TSbatches */
-    std::map<batchIdType, TimeSeriesBatch> _loadedBatches;
+    /* cache should own the batch so use emplace */
+    std::map<batchIdType, TimeSeriesBatch> _cache;
 
     // Namespace of underlying collection
     StringData _db = NULL;
     StringData _coll = NULL;
-
-    // pointer to the database
 };
-
-// careful with this one: it's for testing
-extern TimeSeriesBatchManager _globalTimeSeriesBatchManager;
 
 }  // namespace mongo

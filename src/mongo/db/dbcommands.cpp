@@ -1553,113 +1553,115 @@ bool Command::run(OperationContext* txn,
     log() << "cmd: " << cmd;
     if (ViewCatalog::getInstance()->lookup(nss.ns())) {
         ViewDefinition *view = ViewCatalog::getInstance()->lookup(nss.ns());
+        
         if (cmd.hasField("insert") || cmd.hasField("update") || cmd.hasField("delete") ||
             cmd.hasField("findAndModify")) {
 
-            // log() << "It's a view, trying to modify";
+            if (view->isWritable()) {
+                // log() << "It's a view, trying to modify";
+                log() << cmd;
+                // log() << view->toString();
+                // Detect a time series view.
+                if (cmd.hasField("insert") && (view->isTimeSeries())) {
+                    // log() << "Detected time series view insert attempt";
+                    // log() << cmd.getField("documents");
 
-            log() << cmd;
-            // log() << view->toString();
+                    // Setup for inserting saved documents
 
-            // Detect a time series view.
-            if (cmd.hasField("insert") && (cmd.getStringField("insert") == std::string("timeseriesview"))) {
-                // log() << "Detected time series view insert attempt";
-                // log() << cmd.getField("documents");
+                    // Insert the documents into the in-memory data buffer
+                    for (auto doc : cmd.getField("documents").Obj()) {
+                        BSONObj obj = doc.Obj();
+                        // log() << "Inserting " << obj;
 
-                // Setup for inserting saved documents
+                        uassert(ErrorCodes::UnsupportedFormat, "_id field required on insert to timeseries.",
+                            obj.hasField("_id"));
+                        uassert(ErrorCodes::UnsupportedFormat, "_id field must contain a Date type for timeseries.",
+                            obj.getField("_id").type() == mongo::Date);
 
-                // Insert the documents into the in-memory data buffer
-                for (auto doc : cmd.getField("documents").Obj()) {
-                    BSONObj obj = doc.Obj();
-                    // log() << "Inserting " << obj;
-
-                    uassert(ErrorCodes::UnsupportedFormat, "_id field required on insert to timeseries.",
-                        obj.hasField("_id"));
-                    uassert(ErrorCodes::UnsupportedFormat, "_id field must contain a Date type for timeseries.",
-                        obj.getField("_id").type() == mongo::Date);
-
-                    // create the object
-                    BSONObjBuilder builder;
-                    for (BSONElement field : obj) {
-                        const StringData fieldName = field.fieldNameStringData();
-                        if (fieldName == "_id") {
-                            builder.append("_id", field.Date());
-                        } else {
-                            builder.append(field);
+                        // create the object
+                        BSONObjBuilder builder;
+                        for (BSONElement field : obj) {
+                            const StringData fieldName = field.fieldNameStringData();
+                            if (fieldName == "_id") {
+                                builder.append("_id", field.Date());
+                            } else {
+                                builder.append(field);
+                            }
                         }
+                        BSONObj docToInsert = builder.obj();
+                        // log() << "constructed " << docToInsert;
+
+                        // insert the object into the in-memory data store
+                        view->getTSCache()->insert(docToInsert);
+                        // log() << "Insert of " << docToInsert << " completed.";
+
+                        // Get batch to save to the backing collection
+                        BSONObj toSave = view->getTSCache()->retrieveBatch(docToInsert.getField("_id").Date());
+                        // log() << "saving" << toSave;
+
+                        /* Create and insert. */
+                        // Fake a new insert command
+                        /*
+                        BSONObjBuilder cmdBuilder2;
+                        cmdBuilder2.append("insert", view->backingViewName());
+                        BSONArrayBuilder docsArray;
+                        docsArray.append(toSave);
+                        cmdBuilder2.append("documents", docsArray.arr());
+                        cmdBuilder2.append("ordered", true);
+
+                        BSONObj newCmd2 = cmdBuilder2.obj();
+                        log() << "Inserting: " << newCmd2;
+
+                        // doesn't call itself -- has too many arguments for that
+                        bool result2 = this->run(txn, db, newCmd2, 0, errmsg, inPlaceReplyBob);
+                        log() << "survived saving to collection, with result " << result2;
+
+                        */
+
+                        // Attempt to upsert
+                        // Fake a new upsert command
+                        BSONObjBuilder cmdBuilder;
+                        cmdBuilder.append("update", view->backingViewName());
+
+                        BSONObjBuilder updateObj;
+
+                        // Create query
+                        BSONObjBuilder query;
+                        query.append("_id", toSave.getField("_id").Long());
+                        updateObj.append("q", query.obj());
+                        // Add the other parts
+                        updateObj.append("u", toSave);
+                        updateObj.append("multi", false);
+                        updateObj.append("upsert", true);
+
+                        BSONArrayBuilder updateArray;
+                        updateArray.append(updateObj.obj());
+                        cmdBuilder.append("updates", updateArray.arr());
+                        cmdBuilder.append("ordered", true);
+
+                        BSONObj newCmd = cmdBuilder.obj();
+                        // log() << newCmd;
+
+                        // Create an update command.
+                        Command *update = Command::findCommand("update");
+                        //log() << update->getName();
+                        // bool result = update->run(txn, db, newCmd, 0, errmsg, inPlaceReplyBob);
+                        update->run(txn, db, newCmd, 0, errmsg, inPlaceReplyBob);
+                        //log() << "survived saving to collection, with result " << result;
+
+                        //log() << "HOORAY WE UPSERTED";
                     }
-                    BSONObj docToInsert = builder.obj();
-                    // log() << "constructed " << docToInsert;
 
-                    // insert the object into the in-memory data store
-                    view->getTSManager()->insert(docToInsert);
-                    // log() << "Insert of " << docToInsert << " completed.";
-
-                    // Get batch to save to the backing collection
-                    BSONObj toSave = view->getTSManager()->retrieveBatch(docToInsert.getField("_id").Date());
-                    // log() << "saving" << toSave;
-
-                    /* Create and insert. */
-                    // Fake a new insert command
-                    /*
-                    BSONObjBuilder cmdBuilder2;
-                    cmdBuilder2.append("insert", view->backingViewName());
-                    BSONArrayBuilder docsArray;
-                    docsArray.append(toSave);
-                    cmdBuilder2.append("documents", docsArray.arr());
-                    cmdBuilder2.append("ordered", true);
-
-                    BSONObj newCmd2 = cmdBuilder2.obj();
-                    log() << "Inserting: " << newCmd2;
-
-                    // doesn't call itself -- has too many arguments for that
-                    bool result2 = this->run(txn, db, newCmd2, 0, errmsg, inPlaceReplyBob);
-                    log() << "survived saving to collection, with result " << result2;
-
-                    */
-
-                    // Attempt to upsert
-                    // Fake a new upsert command
-                    BSONObjBuilder cmdBuilder;
-                    cmdBuilder.append("update", view->backingViewName());
-
-                    BSONObjBuilder updateObj;
-
-                    // Create query
-                    BSONObjBuilder query;
-                    query.append("_id", toSave.getField("_id").Long());
-                    updateObj.append("q", query.obj());
-                    // Add the other parts
-                    updateObj.append("u", toSave);
-                    updateObj.append("multi", false);
-                    updateObj.append("upsert", true);
-
-                    BSONArrayBuilder updateArray;
-                    updateArray.append(updateObj.obj());
-                    cmdBuilder.append("updates", updateArray.arr());
-                    cmdBuilder.append("ordered", true);
-
-                    BSONObj newCmd = cmdBuilder.obj();
-                    // log() << newCmd;
-
-                    // Create an update command.
-                    Command *update = Command::findCommand("update");
-                    //log() << update->getName();
-                    // bool result = update->run(txn, db, newCmd, 0, errmsg, inPlaceReplyBob);
-                    update->run(txn, db, newCmd, 0, errmsg, inPlaceReplyBob);
-                    //log() << "survived saving to collection, with result " << result;
-
-                    //log() << "HOORAY WE UPSERTED";
+                    // deal with this Bob character
+                    auto result = appendCommandStatus(inPlaceReplyBob, Status::OK());
+                    inPlaceReplyBob.doneFast();
+                    // This metadata should probably not be empty.
+                    replyBuilder->setMetadata(rpc::makeEmptyMetadata());
+                    return result;
                 }
-
-                // deal with this Bob character
-                auto result = appendCommandStatus(inPlaceReplyBob, Status::OK());
-                inPlaceReplyBob.doneFast();
-                // This metadata should probably not be empty.
-                replyBuilder->setMetadata(rpc::makeEmptyMetadata());
-                return result;
             }
             else {
+              // Unwritable views cannot be modified.
               auto result = appendCommandStatus(inPlaceReplyBob,
                                               {ErrorCodes::CommandNotSupportedOnView,
                                                str::stream() << "Command not supported on views."});
