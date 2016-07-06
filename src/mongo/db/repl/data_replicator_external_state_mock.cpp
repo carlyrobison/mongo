@@ -42,7 +42,7 @@ DataReplicatorExternalStateMock::DataReplicatorExternalStateMock()
                       MultiApplier::ApplyOperationFn) { return ops.back().getOpTime(); }) {}
 
 executor::TaskExecutor* DataReplicatorExternalStateMock::getTaskExecutor() const {
-    return nullptr;
+    return taskExecutor;
 }
 
 OpTimeWithTerm DataReplicatorExternalStateMock::getCurrentTermAndLastCommittedOpTime() {
@@ -69,6 +69,10 @@ std::unique_ptr<OplogBuffer> DataReplicatorExternalStateMock::makeInitialSyncOpl
 std::unique_ptr<OplogBuffer> DataReplicatorExternalStateMock::makeSteadyStateOplogBuffer(
     OperationContext* txn) const {
     return stdx::make_unique<OplogBufferBlockingQueue>();
+}
+
+StatusWith<ReplicaSetConfig> DataReplicatorExternalStateMock::getCurrentConfig() const {
+    return replSetConfig;
 }
 
 StatusWith<OpTime> DataReplicatorExternalStateMock::_multiApply(
