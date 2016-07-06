@@ -97,8 +97,6 @@
 #include "mongo/rpc/metadata/server_selection_metadata.h"
 #include "mongo/rpc/metadata/sharding_metadata.h"
 #include "mongo/rpc/reply_builder_interface.h"
-#include "mongo/rpc/reply_builder_interface.h"
-#include "mongo/rpc/request_interface.h"
 #include "mongo/rpc/request_interface.h"
 #include "mongo/s/chunk_version.h"
 #include "mongo/s/client/shard_registry.h"
@@ -1620,7 +1618,7 @@ bool Command::run(OperationContext* txn,
 
                     */
 
-                    // Attempt to upsert -- currently in development
+                    // Attempt to upsert
                     // Fake a new upsert command
                     BSONObjBuilder cmdBuilder;
                     cmdBuilder.append("update", view->backingViewName());

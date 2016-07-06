@@ -34,10 +34,9 @@
 #include "mongo/db/timeseries/timeseries.h"
 #include "mongo/util/log.h"
 
-
-
 namespace mongo {
 
+using mongo::OperationContext;
 
 TimeSeriesBatch::TimeSeriesBatch(const BSONObj& batchDocument) {
     BSONObj batchDoc = batchDocument.getOwned();
@@ -115,30 +114,61 @@ batchIdType TimeSeriesBatch::_thisBatchId() {
     return _batchId;
 }
 
-// /bool save(Database *db, Collection *coll) {
+// bool TimeSeriesBatch::save(StringData db, StringData coll) {
 //     // Step 1: Construct the txn
+//     OperationContext txn = getGlobalServiceContext()->makeOperationContext(&cc());
+//     // Step 2: Construct the command and its arguments
+//     Command *save = Command::findCommand("update");
+//     std::string errmsg;
+//     BSONObjBuilder ReplyBob;
+//     BSONObj upsertCmd = _constructUpsertCommand(coll);
 
-//     // Step 2: Perform the save txn
-//     auto result = this->run(txn, db, cmd, 0, errmsg, inPlaceReplyBob);
+//     log() << txn;
+//     //bool result = save->run(txn, db, upsertCmd, 0, errmsg, inPlaceReplyBob);
 
 //     // Step 3: Construct the response
-//     appendCommandStatus(inPlaceReplyBob, result, errmsg);
-//     inPlaceReplyBob.doneFast();
+//     //Command::appendCommandStatus(ReplyBob, result, errmsg);
+//     ReplyBob.doneFast();
 
-//     BSONObjBuilder metadataBob;
-//     appendOpTimeMetadata(txn, request, &metadataBob);
-//     replyBuilder->setMetadata(metadataBob.done());
+//     //BSONObjBuilder metadataBob;
+//     //appendOpTimeMetadata(txn, request, &metadataBob);
+//     //replyBuilder->setMetadata(metadataBob.done());
 
-//     return result;
-
-//     std::string toNs = db->name() + "." + shortTo;
-//     Collection* toCollection = db->getCollection(toNs);
-//     const NamespaceString& collectionName
-//     AutoGetDb autoDb(txn, collectionName.db(), MODE_X);
-//     Database* db = autoDb.getDb();
-//     Collection* collection = db->getCollection(collectionName);
-
+//     //return result;
+//     return true;
 // }
+
+// BSONObj TimeSeriesBatch::_constructUpsertCommand(StringData coll) {
+//     BSONObjBuilder cmdBuilder;
+//     cmdBuilder.append("update", coll);
+
+//     BSONObjBuilder updateObj;
+
+//     // Create query
+//     BSONObjBuilder query;
+//     query.append("_id", _batchId);
+//     updateObj.append("q", query.obj());
+//     // Add the other parts
+//     updateObj.append("u", retrieveBatch());
+//     updateObj.append("multi", false);
+//     updateObj.append("upsert", true);
+
+//     BSONArrayBuilder updateArray;
+//     updateArray.append(updateObj.obj());
+//     cmdBuilder.append("updates", updateArray.arr());
+//     cmdBuilder.append("ordered", true);
+
+//     BSONObj newCmd = cmdBuilder.obj();
+//     log() << "newcmd: " << newCmd;
+
+//     return newCmd;
+// }
+
+
+TimeSeriesBatchManager::TimeSeriesBatchManager(StringData db, StringData coll) {
+    _db = db;
+    _coll = coll;
+}
 
 void TimeSeriesBatchManager::insert(const BSONObj& doc) {
 	Date_t date = doc.getField("_id").Date();
@@ -226,6 +256,22 @@ void TimeSeriesBatchManager::removeBatch(const Date_t& time) {
 
     // TODO: gracefully close the batch, i.e. freeing memory we used?
     _loadedBatches.erase(batchId);
+}
+
+bool TimeSeriesBatchManager::saveBatch(const Date_t& time){
+    batchIdType batchId = _getBatchId(time);
+
+    // Assert that the batch exists
+    uassert(BATCH_NONEXISTENT, "Cannot save a batch that doesn't exist.",
+        _loadedBatches.find(batchId) != _loadedBatches.end());
+
+    //TimeSeriesBatch& batch = _loadedBatches[batchId];
+
+    // Assert that the batch manager has a collection to save to
+    //fassert(0000, (_db != NULL) && (_coll != NULL));
+
+    //return batch.save(_db, _coll);
+    return false;
 }
 
 batchIdType TimeSeriesBatchManager::_getBatchId(const Date_t& time) {

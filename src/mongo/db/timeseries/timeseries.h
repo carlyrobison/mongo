@@ -34,6 +34,10 @@
 #include "mongo/util/time_support.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/base/status.h"
+#include "mongo/base/string_data.h"
+#include "mongo/db/commands.h"
+#include "mongo/db/service_context.h"
+#include "mongo/db/client.h"
 
 #include <string>
 #include <assert.h>
@@ -100,8 +104,8 @@ public:
     /* Reports this batch's batch Id */
     batchIdType _thisBatchId();
 
-    // /* Saves to a collection */
-    // Status save(Collection coll);
+    /* Saves to a collection */
+    // bool save(StringData db, StringData coll);
 
     /* Assuming this is the deconstructor. Saves the contents of the buffer
      * (on disk?) and disappears */
@@ -112,6 +116,8 @@ private:
     batchIdType _batchId;
 
     std::map<Date_t, BSONObj> _docs;
+
+    // BSONObj _constructUpsertCommand(StringData collName);
 };
 
 
@@ -121,6 +127,8 @@ private:
 class TimeSeriesBatchManager {
 public:
     TimeSeriesBatchManager() = default;
+
+    TimeSeriesBatchManager(StringData db, StringData coll);
 
     /* Inserts a document into the corresponding batch */
     void insert(const BSONObj& doc);
@@ -141,6 +149,9 @@ public:
 
     void removeBatch(const Date_t& time);
 
+    bool saveBatch(const Date_t& time); // Saves a specific batch to
+    // the backing collection
+
     // When trying to get rid of TS Manager, save everything to the collection
     // ~TimeSeriesBatchManager();
 
@@ -151,7 +162,9 @@ private:
     /* Map of batch IDs to TSbatches */
     std::map<batchIdType, TimeSeriesBatch> _loadedBatches;
 
-    // namespace string of underlying collection _namespace;
+    // Namespace of underlying collection
+    StringData _db = NULL;
+    StringData _coll = NULL;
 
     // pointer to the database
 };
