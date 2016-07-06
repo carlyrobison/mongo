@@ -26,28 +26,43 @@
  *    then also delete it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kSharding
+
 #include "mongo/platform/basic.h"
 
-#include "mongo/base/init.h"
 #include "mongo/db/auth/action_type.h"
 #include "mongo/db/auth/authorization_session.h"
 #include "mongo/db/auth/privilege.h"
 #include "mongo/db/commands.h"
-#include "mongo/s/balancer/balancer.h"
-#include "mongo/s/balancer/balancer_configuration.h"
+#include "mongo/db/namespace_string.h"
+#include "mongo/s/catalog/sharding_catalog_manager.h"
 #include "mongo/s/grid.h"
+#include "mongo/s/request_types/remove_shard_from_zone_request_type.h"
+#include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
 
 namespace mongo {
 namespace {
 
-class ConfigSvrBalancerControlCommand : public Command {
+using std::string;
+
+/**
+ * Internal sharding command run on config servers to remove a shard from the given zone.
+ *
+ * Format:
+ * {
+ *   _configsvrRemoveShardFromZone: <string shardName>,
+ *   zone: <string zoneName>,
+ *   writeConcern: <BSONObj>
+ * }
+ */
+class ConfigSvrRemoveShardFromZoneCommand : public Command {
 public:
-    ConfigSvrBalancerControlCommand(StringData name) : Command(name) {}
+    ConfigSvrRemoveShardFromZoneCommand() : Command("_configsvrRemoveShardFromZone") {}
 
     void help(std::stringstream& help) const override {
         help << "Internal command, which is exported by the sharding config server. Do not call "
-                "directly. Controls the balancer state.";
+                "directly. Validates and removes the shard from the zone.";
     }
 
     bool slaveOk() const override {
@@ -59,7 +74,7 @@ public:
     }
 
     bool supportsWriteConcern(const BSONObj& cmd) const override {
-        return false;
+        return true;
     }
 
     Status checkAuthForCommand(ClientBasic* client,
@@ -77,68 +92,22 @@ public:
              BSONObj& cmdObj,
              int options,
              std::string& errmsg,
-             BSONObjBuilder& result) final {
-        if (cmdObj.firstElementFieldName() != getName()) {
-            uasserted(ErrorCodes::InternalError,
-                      str::stream() << "Expected to find a " << getName() << " command, but found "
-                                    << cmdObj);
-        }
-
+             BSONObjBuilder& result) override {
         if (serverGlobalParams.clusterRole != ClusterRole::ConfigServer) {
             uasserted(ErrorCodes::IllegalOperation,
-                      str::stream() << getName() << " can only be run on config servers");
+                      "_configsvrAddShardToZone can only be run on config servers");
         }
 
-        _run(txn, &result);
+        auto parsedRequest =
+            uassertStatusOK(RemoveShardFromZoneRequest::parseFromConfigCommand(cmdObj));
+
+        uassertStatusOK(Grid::get(txn)->catalogManager()->removeShardFromZone(
+            txn, parsedRequest.getShardName(), parsedRequest.getZoneName()));
 
         return true;
     }
 
-private:
-    virtual void _run(OperationContext* txn, BSONObjBuilder* result) = 0;
-};
-
-class ConfigSvrBalancerStartCommand : public ConfigSvrBalancerControlCommand {
-public:
-    ConfigSvrBalancerStartCommand() : ConfigSvrBalancerControlCommand("_configsvrBalancerStart") {}
-
-private:
-    void _run(OperationContext* txn, BSONObjBuilder* result) override {
-        uassertStatusOK(Grid::get(txn)->getBalancerConfiguration()->setBalancerMode(
-            txn, BalancerSettingsType::kFull));
-    }
-};
-
-class ConfigSvrBalancerStopCommand : public ConfigSvrBalancerControlCommand {
-public:
-    ConfigSvrBalancerStopCommand() : ConfigSvrBalancerControlCommand("_configsvrBalancerStop") {}
-
-private:
-    void _run(OperationContext* txn, BSONObjBuilder* result) override {
-        uassertStatusOK(Grid::get(txn)->getBalancerConfiguration()->setBalancerMode(
-            txn, BalancerSettingsType::kOff));
-        Balancer::get(txn)->joinCurrentRound(txn);
-    }
-};
-
-class ConfigSvrBalancerStatusCommand : public ConfigSvrBalancerControlCommand {
-public:
-    ConfigSvrBalancerStatusCommand()
-        : ConfigSvrBalancerControlCommand("_configsvrBalancerStatus") {}
-
-private:
-    void _run(OperationContext* txn, BSONObjBuilder* result) override {
-        Balancer::get(txn)->report(txn, result);
-    }
-};
-
-MONGO_INITIALIZER(ClusterBalancerControlCommands)(InitializerContext* context) {
-    new ConfigSvrBalancerStartCommand();
-    new ConfigSvrBalancerStopCommand();
-    new ConfigSvrBalancerStatusCommand();
-
-    return Status::OK();
-}
+} configsvrRemoveShardFromZoneCmd;
 
 }  // namespace
 }  // namespace mongo

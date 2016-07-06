@@ -1295,7 +1295,7 @@ void ShardingCatalogClientImpl::_runBatchWriteCommand(OperationContext* txn,
         Status status = Shard::CommandResponse::processBatchWriteResponse(response, batchResponse);
         if (retry < kMaxWriteRetry && configShard->isRetriableError(status.code(), retryPolicy)) {
             batchResponse->clear();
-            LOG(1) << "Batch write command failed with retriable error and will be retried"
+            LOG(2) << "Batch write command failed with retriable error and will be retried"
                    << causedBy(status);
             continue;
         }
@@ -1492,7 +1492,9 @@ Status ShardingCatalogClientImpl::_checkDbDoesNotExist(OperationContext* txn,
 Status ShardingCatalogClientImpl::_createCappedConfigCollection(OperationContext* txn,
                                                                 StringData collName,
                                                                 int cappedSize) {
-    BSONObj createCmd = BSON("create" << collName << "capped" << true << "size" << cappedSize);
+    BSONObj createCmd =
+        BSON("create" << collName << "capped" << true << "size" << cappedSize << "writeConcern"
+                      << ShardingCatalogClient::kMajorityWriteConcern.toBSON());
 
     auto result = Grid::get(txn)->shardRegistry()->getConfigShard()->runCommand(
         txn,
