@@ -20,21 +20,6 @@ let needsToFailWithViewsErrorCode = "TO DO: needs to fail with a views-specific 
 let needsTriage = "TO DO: needs triage";
 
 var viewsCommandTests = {
-    _configsvrAddShard: {skip: isAnInternalCommand},
-    _configsvrAddShardToZone: {skip: isAnInternalCommand},
-    _configsvrCommitChunkMigration: {skip: isAnInternalCommand},
-    _configsvrControlBalancer: {skip: isAnInternalCommand},
-    _configsvrMoveChunk: {skip: isAnInternalCommand},
-    _getUserCacheGeneration: {skip: isAnInternalCommand},
-    _hashBSONElement: {skip: isAnInternalCommand},
-    _isSelf: {skip: isAnInternalCommand},
-    _mergeAuthzCollections: {skip: isAnInternalCommand},
-    _migrateClone: {skip: isAnInternalCommand},
-    _recvChunkAbort: {skip: isAnInternalCommand},
-    _recvChunkCommit: {skip: isAnInternalCommand},
-    _recvChunkStart: {skip: isAnInternalCommand},
-    _recvChunkStatus: {skip: isAnInternalCommand},
-    _transferMods: {skip: isAnInternalCommand},
     aggregate: {skip: "tested in views/views_aggregation.js"},
     appendOplogNote: {skip: isUnrelated},
     applyOps: {

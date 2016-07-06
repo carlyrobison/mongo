@@ -31,7 +31,8 @@
 
     let commands = res.commands;
     for (let command in commands) {
-        if (!commands.hasOwnProperty(command))
+        // Skip internal commands.
+        if (command.charAt(0) === '_')
             continue;
 
         let test = viewsCommandTests[command];
