@@ -38,7 +38,6 @@
 
 #include <string>
 #include <assert.h>
-#include <queue>
 
 #pragma once
 
@@ -100,7 +99,7 @@ public:
     void remove(const Date_t& time);
 
     /* Reports this batch's batch Id */
-    batchIdType _thisBatchId();
+    batchIdType _thisBatchId() const;
 
     /* Saves to a collection */
     // bool save(StringData db, StringData coll);
@@ -127,29 +126,38 @@ class TimeSeriesCache {
 public:
     TimeSeriesCache() = default;
 
-    TimeSeriesCache(StringData db, StringData coll);
+    TimeSeriesCache(StringData db, StringData coll, size_t maxSize = 0);
 
-    /* Inserts a document into the corresponding batch */
+    /* Inserts a document into the corresponding batch.
+     * Creates the batch if necessary. */
     void insert(const BSONObj& doc);
 
-    /* Loads a batch */
+    /* Loads a batch into the cache and the cache list */
     void loadBatch(const BSONObj& doc);
 
-    /* Updates a document in the corresponding batch */
+    /* Updates a document in the corresponding batch.
+     * Checks for space? Updates LRU list */
     void update(const BSONObj& doc);
 
-    /* Gets the document corresponding to that date and time */
+    /* Gets the document corresponding to that date and time.
+     * Updates LRU list */
     BSONObj retrieve(const Date_t& time);
 
+    /* Updates LRU list */
     BSONObj retrieveBatch(const Date_t& time);
 
-    /* Removes the document at that time */
+    /* Removes the document at that time.
+     * Decrements the space? */
     void remove(const Date_t& time);
 
+    /* Removes a specific batch from the collection. Deletes it from the cache,
+     * and the cache list, decrements cache size. */
     void removeBatch(const Date_t& time);
 
     /**
-     * Saves a specific batch to the backing collection
+     * Saves a specific batch to the backing collection. Saving consists of:
+     * Saving to the collection
+     * Updating the LRU list
      */
     bool saveBatch(const Date_t& time);
 
@@ -157,15 +165,36 @@ public:
     // ~TimeSeriesCache();
 
 private:
-    /* Eviction methods that should not be able to be called by external classes */
+    /* Cache methods that should not be able to be called by external classes */
 
     /* Evicts a batch and saves it to the backing collection in doing so.
-     * Returns the batch Id of the cache that was evicted. Uses an LRU algorithm */
+     * Returns the batch Id of the cache that was evicted. Uses an LRU algorithm
+     * to determine which batch to evict. */
     batchIdType evictBatch();
 
-    /* Linked list for LRU part of cache */
-    std::queue<batchIdType> _lruQueue;
+    /* Adds a batch to the LRU list. Checks if the cache needs to evict after
+     * this operation, and does so if needed. */
+    void addToLRUList(batchIdType batchId);
 
+    /* Removes a batch from the LRU list. */
+    void removeFromLRUList(batchIdType batchId);
+
+    /* Determines if adding something of this size needs an eviction */
+    bool needsEviction();
+
+    /* Drops a batch from the cache */
+    void dropFromCache(batchIdType batchId);
+
+    /* Adds to the cache, updates the LRU list, determines if eviction needed... */
+    void addToCache(const TimeSeriesBatch& batch);
+
+    /* Queue for LRU part of cache: least recently used is at the front, we add
+     * new elements to the back */
+    std::list<batchIdType> _lruList;
+
+    /* Sizes of the cache */
+    size_t _curSize = 0;
+    size_t _maxSize;
 
 private:
     /* Converts a date to the corresponding batch id number */

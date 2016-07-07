@@ -108,7 +108,7 @@ void TimeSeriesBatch::remove(const Date_t& time) {
 	_docs.erase(time);
 }
 
-batchIdType TimeSeriesBatch::_thisBatchId() {
+batchIdType TimeSeriesBatch::_thisBatchId() const {
     return _batchId;
 }
 
@@ -163,9 +163,10 @@ batchIdType TimeSeriesBatch::_thisBatchId() {
 // }
 
 
-TimeSeriesCache::TimeSeriesCache(StringData db, StringData coll) {
+TimeSeriesCache::TimeSeriesCache(StringData db, StringData coll, size_t maxSize) {
     _db = db;
     _coll = coll;
+    _maxSize = maxSize;
 }
 
 void TimeSeriesCache::insert(const BSONObj& doc) {
@@ -175,14 +176,14 @@ void TimeSeriesCache::insert(const BSONObj& doc) {
 
     // Check if the batch exists. If it doesn't, make one. If it does, use the existing one.
     if (_cache.find(batchId) == _cache.end()) {
+        // Eventually, should try to load it from the collection.
     	// Batch does not exist, create one.
-    	TimeSeriesBatch batch(batchId);
-    	_cache[batchId] = batch;
+        addToCache(TimeSeriesBatch(batchId));
+    } else { // Simply add it to the LRU cache
+        addToLRUList(batchId);
     }
-    
-    TimeSeriesBatch& batch = _cache[batchId];
 
-    batch.insert(doc);
+    _cache[batchId].insert(doc);
 }
 
 void TimeSeriesCache::loadBatch(const BSONObj& doc) {
@@ -192,11 +193,13 @@ void TimeSeriesCache::loadBatch(const BSONObj& doc) {
     uassert(40155, "Cannot load a batch that already exists.",
         _cache.find(batchId) == _cache.end());
 
-    _cache[batchId] = TimeSeriesBatch(doc);
+    addToCache(TimeSeriesBatch(doc));
 }
 
 void TimeSeriesCache::update(const BSONObj& doc) {
 	Date_t date = doc.getField("_id").Date();
+
+    log() << "Update unsupported.";
 
 	batchIdType batchId = _getBatchId(date);
 
@@ -212,11 +215,15 @@ void TimeSeriesCache::update(const BSONObj& doc) {
 BSONObj TimeSeriesCache::retrieve(const Date_t& time) {
     batchIdType batchId = _getBatchId(time);
 
+    log() << "Why are you retrieving from the cache? Use the find() path!";
+
 	// Assert that the batch exists.
     uassert(BATCH_NONEXISTENT, "Cannot retrieve from a batch that doesn't exist.",
     	_cache.find(batchId) != _cache.end());
 
     TimeSeriesBatch& batch = _cache[batchId];
+
+    addToLRUList(batchId);
 
     return batch.retrieve(time);
 }
@@ -230,6 +237,8 @@ BSONObj TimeSeriesCache::retrieveBatch(const Date_t& time) {
 
     TimeSeriesBatch& batch = _cache[batchId];
 
+    addToLRUList(batchId);
+
     return batch.retrieveBatch();
 }
 
@@ -242,7 +251,9 @@ void TimeSeriesCache::remove(const Date_t& time) {
 
     TimeSeriesBatch& batch = _cache[batchId];
 
-    return batch.remove(time);
+    batch.remove(time);
+
+    addToLRUList(batchId);
 }
 
 void TimeSeriesCache::removeBatch(const Date_t& time) {
@@ -253,7 +264,11 @@ void TimeSeriesCache::removeBatch(const Date_t& time) {
     	_cache.find(batchId) != _cache.end());
 
     // TODO: gracefully close the batch, i.e. freeing memory we used?
-    _cache.erase(batchId);
+
+    /* Remove from the collection */
+
+    /* Remove from cache */
+    dropFromCache(batchId);
 }
 
 bool TimeSeriesCache::saveBatch(const Date_t& time){
@@ -268,19 +283,74 @@ bool TimeSeriesCache::saveBatch(const Date_t& time){
     // Assert that the batch manager has a collection to save to
     //massert(0000, (_db != NULL) && (_coll != NULL));
 
+    addToLRUList(batchId);
+
     //return batch.save(_db, _coll);
     return false;
 }
 
 batchIdType TimeSeriesCache::evictBatch() {
     // Step 1: Choose the least recently used batch to evict.
-    massert(000, "Empty cache", !_lruQueue.empty());
+    massert(40156, "Timeseries cache is empty; cannot evict from an empty cache",
+        !_lruList.empty());
 
-    // Step 2: save the batch to the underlying collection
+    /* Save the batch to the underlying collection */
+    batchIdType toEvict = _lruList.front();
+    //_cache[toEvict].save();
 
-    // Return the batchIdType
-    return 0;
+    _cache.erase(toEvict);
+    _lruList.pop_front();
+
+    return toEvict;
 }
+
+void TimeSeriesCache::addToLRUList(batchIdType batchId) {
+    /* Remove the batchId from the list if it's already in there.
+     * This is O(n) but n is 4 */
+    removeFromLRUList(batchId);
+    /* Add the batchId to the back (most recently used) */
+    _lruList.push_back(batchId);
+
+    log() << "Added " << batchId << " to LRU list";
+}
+
+void TimeSeriesCache::removeFromLRUList(batchIdType batchId) {
+    _lruList.remove(batchId);
+}
+
+bool TimeSeriesCache::needsEviction() {
+    /* Only allow 4 batches */
+    return (_lruList.size() >= 4);
+}
+
+void TimeSeriesCache::dropFromCache(batchIdType batchId) {
+    /* Assert that the batch exists in the cache */
+    massert(40157, "Batch must exist in the cache", _cache.find(batchId) != _cache.end());
+
+    /* Drop the batch from the cache */
+    _cache.erase(batchId);
+
+    /* Remove the batch from the LRU list */
+    removeFromLRUList(batchId);
+}
+
+/* Adds to the cache, updates the LRU list, determines if eviction needed... */
+void TimeSeriesCache::addToCache(const TimeSeriesBatch& batch) {
+    batchIdType batchId = batch._thisBatchId();
+
+    massert(40158, "Batch is already in the cache", _cache.find(batchId) == _cache.end());
+
+    if (needsEviction()) { // make space in the cache
+        log() << "Eviction required";
+        log() << "Evicted batch: " << evictBatch();
+    }
+
+    _cache[batchId] = batch; // add the batch to the cache
+    addToLRUList(batchId);
+
+    log() << "Added batch: " << batchId << " to the cache";
+}
+
 
 batchIdType TimeSeriesCache::_getBatchId(const Date_t& time) {
 	long long millis = time.toMillisSinceEpoch();

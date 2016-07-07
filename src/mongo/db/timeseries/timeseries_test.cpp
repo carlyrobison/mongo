@@ -36,6 +36,7 @@
 #include "mongo/util/log.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 namespace mongo {
 
@@ -112,9 +113,9 @@ TEST(TimeSeries, BatchLoading) {
 
 // Tests inserting documents into many batch documents.
 TEST(TimeSeries, BatchManagerInsert) {
-    TimeSeriesBatchManager manager;
+    TimeSeriesCache manager;
     // Insert documents over the span of five seconds.
-    for (int i = 0; i < 5000; i++) {
+    for (int i = 0; i < 4000; i++) {
         BSONObjBuilder builder;
         builder.append("_id", Date_t::fromMillisSinceEpoch(i));
         builder.append("num", i);
@@ -122,7 +123,7 @@ TEST(TimeSeries, BatchManagerInsert) {
     }
 
     // Check retrieval
-    for (int j = 0; j < 5; j++) {
+    for (int j = 0; j < 4; j++) {
         for (int i = 0; i < 1000; i++) {
             int t = (j * 1000) + i;
             Date_t date = Date_t::fromMillisSinceEpoch(t);
@@ -130,6 +131,7 @@ TEST(TimeSeries, BatchManagerInsert) {
             ASSERT_EQUALS(retrievedDoc["num"].Int(), t);
             ASSERT_EQUALS(manager.retrieveBatch(date).getField("_id").numberLong(), j);
         }
+        // NOTE: only do j up to 4 because that's the size of the cache.
     }
 
     // Check that we can't retrieve or retrieve from a batch that doesn't exist.
@@ -140,7 +142,7 @@ TEST(TimeSeries, BatchManagerInsert) {
 }
 
 TEST(TimeSeries, Update) {
-    TimeSeriesBatchManager manager;
+    TimeSeriesCache manager;
 
     // Insert some documents
     for (int i = 0; i < 900; i++) {
@@ -189,7 +191,7 @@ TEST(TimeSeries, Update) {
 }
 
 TEST(TimeSeries, Remove) {
-    TimeSeriesBatchManager manager;
+    TimeSeriesCache manager;
 
     // Insert some documents
     for (int i = 0; i < 900; i++) {
@@ -235,6 +237,59 @@ TEST(TimeSeries, Remove) {
     // Check that the batch still exists
     // Remove the batch
     // Check that the batch does not exist anymore
+
+}
+
+TEST(TimeSeries, Cache) {
+    TimeSeriesCache cache;
+
+    // Insert some documents
+    for (int i = 0; i < 5000; i += 100) {
+        BSONObjBuilder builder;
+        builder.append("_id", Date_t::fromMillisSinceEpoch(i));
+        builder.append("num", i);
+        cache.insert(builder.obj());
+    }
+
+    // Insert randomly
+    for (int i = 0; i < 100; i++) {
+        BSONObjBuilder builder;
+        int j = rand() % 10000;
+        builder.append("_id", Date_t::fromMillisSinceEpoch(j));
+        builder.append("num", j);
+        cache.insert(builder.obj());
+    }
+
+    // // Remove some documents
+    // for (int i = 0; i < 500; i++) {
+    //     manager.remove(Date_t::fromMillisSinceEpoch(i));
+    // }
+
+    // // Try and remove some documents that don't exist/check that removal was successful
+    // for (int i = 0; i < 500; i++) {
+    //     ASSERT_THROWS_CODE(manager.remove(Date_t::fromMillisSinceEpoch(i)),
+    //         UserException, ErrorCodes::NoSuchKey);
+    // }
+
+    // // Check that the removals did not mess up things we did not remove
+    // for (int i = 500; i < 900; i++) {
+    //     Date_t date = Date_t::fromMillisSinceEpoch(i);
+    //     BSONObj retrievedDoc = manager.retrieve(date);
+    //     ASSERT_EQUALS(retrievedDoc["num"].Int(), i);
+    // }
+
+    // // Check that we can't remove/remove from a batch that doesn't exist
+    // ASSERT_THROWS_CODE(manager.remove(Date_t::fromMillisSinceEpoch(2000)),
+    //     UserException, BATCH_NONEXISTENT);
+    // ASSERT_THROWS_CODE(manager.removeBatch(Date_t::fromMillisSinceEpoch(2000)),
+    //     UserException, BATCH_NONEXISTENT);
+
+    // // Check that the removals did not mess up things we did not remove
+    // for (int i = 500; i < 900; i++) {
+    //     Date_t date = Date_t::fromMillisSinceEpoch(i);
+    //     BSONObj retrievedDoc = manager.retrieve(date);
+    //     ASSERT_EQUALS(retrievedDoc["num"].Int(), i);
+    // }
 
 }
 
