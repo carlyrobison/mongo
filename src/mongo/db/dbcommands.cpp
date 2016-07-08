@@ -108,7 +108,7 @@
 #include "mongo/util/md5.hpp"
 #include "mongo/util/print.h"
 #include "mongo/util/scopeguard.h"
-#include "mongo/db/timeseries/timeseries.h"
+//#include "mongo/db/timeseries/timeseries.h"
 
 namespace mongo {
 
@@ -1592,31 +1592,12 @@ bool Command::run(OperationContext* txn,
                         // log() << "constructed " << docToInsert;
 
                         // insert the object into the in-memory data store
-                        view->getTSCache()->insert(docToInsert);
+                        view->getTSCache()->insert(txn, docToInsert);
                         // log() << "Insert of " << docToInsert << " completed.";
 
                         // Get batch to save to the backing collection
                         BSONObj toSave = view->getTSCache()->retrieveBatch(docToInsert.getField("_id").Date());
                         // log() << "saving" << toSave;
-
-                        /* Create and insert. */
-                        // Fake a new insert command
-                        /*
-                        BSONObjBuilder cmdBuilder2;
-                        cmdBuilder2.append("insert", view->backingViewName());
-                        BSONArrayBuilder docsArray;
-                        docsArray.append(toSave);
-                        cmdBuilder2.append("documents", docsArray.arr());
-                        cmdBuilder2.append("ordered", true);
-
-                        BSONObj newCmd2 = cmdBuilder2.obj();
-                        log() << "Inserting: " << newCmd2;
-
-                        // doesn't call itself -- has too many arguments for that
-                        bool result2 = this->run(txn, db, newCmd2, 0, errmsg, inPlaceReplyBob);
-                        log() << "survived saving to collection, with result " << result2;
-
-                        */
 
                         // Attempt to upsert
                         // Fake a new upsert command

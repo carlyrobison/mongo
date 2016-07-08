@@ -75,14 +75,14 @@ void TimeSeriesBatch::update(const BSONObj& doc) {
 	_docs[date] = newDoc;
 }
 
-BSONObj TimeSeriesBatch::retrieveBatch() {
+BSONObj TimeSeriesBatch::retrieveBatch() const {
     // create the BSON array
     BSONArrayBuilder arrayBuilder;
 
     std::map<Date_t, BSONObj>::iterator i;
 
     // Add values (documents) to the bson array
-    for (i = _docs.begin(); i != _docs.end(); ++i) {
+    for (auto i = _docs.begin(); i != _docs.end(); ++i) {
         arrayBuilder.append(i->second);
     }
 
@@ -112,64 +112,17 @@ batchIdType TimeSeriesBatch::_thisBatchId() const {
     return _batchId;
 }
 
-// bool TimeSeriesBatch::save(StringData db, StringData coll) {
-//     // Step 1: Construct the txn
-//     OperationContext txn = getGlobalServiceContext()->makeOperationContext(&cc());
-//     // Step 2: Construct the command and its arguments
-//     Command *save = Command::findCommand("update");
-//     std::string errmsg;
-//     BSONObjBuilder ReplyBob;
-//     BSONObj upsertCmd = _constructUpsertCommand(coll);
-
-//     log() << txn;
-//     //bool result = save->run(txn, db, upsertCmd, 0, errmsg, inPlaceReplyBob);
-
-//     // Step 3: Construct the response
-//     //Command::appendCommandStatus(ReplyBob, result, errmsg);
-//     ReplyBob.doneFast();
-
-//     //BSONObjBuilder metadataBob;
-//     //appendOpTimeMetadata(txn, request, &metadataBob);
-//     //replyBuilder->setMetadata(metadataBob.done());
-
-//     //return result;
-//     return true;
-// }
-
-// BSONObj TimeSeriesBatch::_constructUpsertCommand(StringData coll) {
-//     BSONObjBuilder cmdBuilder;
-//     cmdBuilder.append("update", coll);
-
-//     BSONObjBuilder updateObj;
-
-//     // Create query
-//     BSONObjBuilder query;
-//     query.append("_id", _batchId);
-//     updateObj.append("q", query.obj());
-//     // Add the other parts
-//     updateObj.append("u", retrieveBatch());
-//     updateObj.append("multi", false);
-//     updateObj.append("upsert", true);
-
-//     BSONArrayBuilder updateArray;
-//     updateArray.append(updateObj.obj());
-//     cmdBuilder.append("updates", updateArray.arr());
-//     cmdBuilder.append("ordered", true);
-
-//     BSONObj newCmd = cmdBuilder.obj();
-//     log() << "newcmd: " << newCmd;
-
-//     return newCmd;
-// }
-
-
-TimeSeriesCache::TimeSeriesCache(StringData db, StringData coll, size_t maxSize) {
-    _db = db;
-    _coll = coll;
-    _maxSize = maxSize;
+bool TimeSeriesBatch::save(OperationContext* txn, const std::string& ns) const {
+    Helpers::upsert(txn, ns, retrieveBatch());
+    return true;
 }
 
-void TimeSeriesCache::insert(const BSONObj& doc) {
+
+TimeSeriesCache::TimeSeriesCache(NamespaceString nss) {
+    _nss = nss;
+}
+
+void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, bool persistent) {
 	Date_t date = doc.getField("_id").Date();
 
     batchIdType batchId = _getBatchId(date);
@@ -178,12 +131,16 @@ void TimeSeriesCache::insert(const BSONObj& doc) {
     if (_cache.find(batchId) == _cache.end()) {
         // Eventually, should try to load it from the collection.
     	// Batch does not exist, create one.
-        addToCache(TimeSeriesBatch(batchId));
+        addToCache(txn, TimeSeriesBatch(batchId));
     } else { // Simply add it to the LRU cache
         addToLRUList(batchId);
     }
 
     _cache[batchId].insert(doc);
+
+    if (persistent) {
+        _cache[batchId].save(txn, _nss.ns());
+    }
 }
 
 void TimeSeriesCache::loadBatch(const BSONObj& doc) {
@@ -193,7 +150,7 @@ void TimeSeriesCache::loadBatch(const BSONObj& doc) {
     uassert(40155, "Cannot load a batch that already exists.",
         _cache.find(batchId) == _cache.end());
 
-    addToCache(TimeSeriesBatch(doc));
+    // addToCache(TimeSeriesBatch(doc));
 }
 
 void TimeSeriesCache::update(const BSONObj& doc) {
@@ -271,32 +228,18 @@ void TimeSeriesCache::removeBatch(const Date_t& time) {
     dropFromCache(batchId);
 }
 
-bool TimeSeriesCache::saveBatch(const Date_t& time){
-    batchIdType batchId = _getBatchId(time);
-
-    // Assert that the batch exists
-    uassert(BATCH_NONEXISTENT, "Cannot save a batch that doesn't exist.",
-        _cache.find(batchId) != _cache.end());
-
-    //TimeSeriesBatch& batch = _cache[batchId];
-
-    // Assert that the batch manager has a collection to save to
-    //massert(0000, (_db != NULL) && (_coll != NULL));
-
-    addToLRUList(batchId);
-
-    //return batch.save(_db, _coll);
-    return false;
+bool TimeSeriesCache::saveToCollection(){
+    return true;
 }
 
-batchIdType TimeSeriesCache::evictBatch() {
+batchIdType TimeSeriesCache::evictBatch(OperationContext* txn) {
     // Step 1: Choose the least recently used batch to evict.
     massert(40156, "Timeseries cache is empty; cannot evict from an empty cache",
         !_lruList.empty());
 
     /* Save the batch to the underlying collection */
     batchIdType toEvict = _lruList.front();
-    //_cache[toEvict].save();
+    _cache[toEvict].save(txn, _nss.ns());
 
     _cache.erase(toEvict);
     _lruList.pop_front();
@@ -335,14 +278,14 @@ void TimeSeriesCache::dropFromCache(batchIdType batchId) {
 }
 
 /* Adds to the cache, updates the LRU list, determines if eviction needed... */
-void TimeSeriesCache::addToCache(const TimeSeriesBatch& batch) {
+void TimeSeriesCache::addToCache(OperationContext* txn, const TimeSeriesBatch& batch) {
     batchIdType batchId = batch._thisBatchId();
 
     massert(40158, "Batch is already in the cache", _cache.find(batchId) == _cache.end());
 
     if (needsEviction()) { // make space in the cache
         log() << "Eviction required";
-        log() << "Evicted batch: " << evictBatch();
+        log() << "Evicted batch: " << evictBatch(txn);
     }
 
     _cache[batchId] = batch; // add the batch to the cache

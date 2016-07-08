@@ -36,6 +36,17 @@
 #include "mongo/base/status.h"
 #include "mongo/base/string_data.h"
 
+//#include "mongo/db/service_context.h"
+//#include "mongo/db/concurrency/write_conflict_exception.h"
+//#include "mongo/db/catalog/collection.h"
+//#include "mongo/db/curop.h"
+//#include "mongo/db/commands.h"
+//#include "mongo/db/client.h"
+//#include "mongo/db/query/query_request.h"
+//#include "mongo/db/db_raii.h"
+
+#include "mongo/db/dbhelpers.h"
+
 #include <string>
 #include <assert.h>
 
@@ -46,6 +57,7 @@ namespace mongo {
 using mongo::ErrorCodes;
 
 typedef long long batchIdType;
+class OperationContext;
 
 static const batchIdType NUM_MILLIS_IN_BATCH = 1000;
 
@@ -90,7 +102,7 @@ public:
     void update(const BSONObj& doc);
 
     /* Retrieves the single BSONObj for the batch document. */
-    BSONObj retrieveBatch();
+    BSONObj retrieveBatch() const;
 
     /* Retrieves a batch document for a given timestamp */
     BSONObj retrieve(const Date_t& time);
@@ -101,8 +113,8 @@ public:
     /* Reports this batch's batch Id */
     batchIdType _thisBatchId() const;
 
-    /* Saves to a collection */
-    // bool save(StringData db, StringData coll);
+    /* Saves a specific batch to a collection */
+    bool save(OperationContext* txn, const std::string& ns) const;
 
     /* Assuming this is the deconstructor. Saves the contents of the buffer
      * (on disk?) and disappears */
@@ -115,7 +127,6 @@ private:
     /* batch should own the docs so use emplace */
     std::map<Date_t, BSONObj> _docs;
 
-    // BSONObj _constructUpsertCommand(StringData collName);
 };
 
 
@@ -126,11 +137,11 @@ class TimeSeriesCache {
 public:
     TimeSeriesCache() = default;
 
-    TimeSeriesCache(StringData db, StringData coll, size_t maxSize = 0);
+    TimeSeriesCache(NamespaceString nss);
 
     /* Inserts a document into the corresponding batch.
      * Creates the batch if necessary. */
-    void insert(const BSONObj& doc);
+    void insert(OperationContext* txn, const BSONObj& doc, bool persistent = false);
 
     /* Loads a batch into the cache and the cache list */
     void loadBatch(const BSONObj& doc);
@@ -155,11 +166,11 @@ public:
     void removeBatch(const Date_t& time);
 
     /**
-     * Saves a specific batch to the backing collection. Saving consists of:
+     * Saves all of the batches at once to the backing collection. Saving consists of:
      * Saving to the collection
-     * Updating the LRU list
+     * Waiting until durable????
      */
-    bool saveBatch(const Date_t& time);
+    bool saveToCollection();
 
     // When trying to get rid of TS Cache, save everything to the collection
     // ~TimeSeriesCache();
@@ -170,7 +181,7 @@ private:
     /* Evicts a batch and saves it to the backing collection in doing so.
      * Returns the batch Id of the cache that was evicted. Uses an LRU algorithm
      * to determine which batch to evict. */
-    batchIdType evictBatch();
+    batchIdType evictBatch(OperationContext* txn);
 
     /* Adds a batch to the LRU list. Checks if the cache needs to evict after
      * this operation, and does so if needed. */
@@ -186,15 +197,11 @@ private:
     void dropFromCache(batchIdType batchId);
 
     /* Adds to the cache, updates the LRU list, determines if eviction needed... */
-    void addToCache(const TimeSeriesBatch& batch);
+    void addToCache(OperationContext* txn, const TimeSeriesBatch& batch);
 
     /* Queue for LRU part of cache: least recently used is at the front, we add
      * new elements to the back */
     std::list<batchIdType> _lruList;
-
-    /* Sizes of the cache */
-    size_t _curSize = 0;
-    size_t _maxSize;
 
 private:
     /* Converts a date to the corresponding batch id number */
@@ -205,8 +212,7 @@ private:
     std::map<batchIdType, TimeSeriesBatch> _cache;
 
     // Namespace of underlying collection
-    StringData _db = NULL;
-    StringData _coll = NULL;
+    NamespaceString _nss;
 };
 
 }  // namespace mongo
