@@ -53,7 +53,7 @@ ViewDefinition::ViewDefinition(StringData dbName,
     : _dbName(dbName.toString()),
       _viewName(viewName.toString()),
       _backingViewName(viewOn.toString()),
-      _timeseries = timeseries,
+      _timeseries(timeseries)
     {
     if (timeseries) {
         tsCache = new TimeSeriesCache();

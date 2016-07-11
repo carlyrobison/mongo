@@ -284,7 +284,6 @@ public:
         // Check if this query is being performed on a view.
         if (auto view = ctx.getView()) {
 
-
             // Check if this is a time series
             // log() << cmdObj;
             // if (view->isTimeSeries()) {
@@ -326,7 +325,7 @@ public:
                 // firstBatch.done(cursorId, nss.ns());
                 // return true;
 
-            else {
+            //} else {
                 ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
                 if (!viewShardingCheck.canRunOnMongod()) {
                     viewShardingCheck.appendResolvedView(result);
@@ -336,7 +335,7 @@ public:
                         {ErrorCodes::ViewMustRunOnMongos,
                          str::stream() << "Command on view must be executed by mongos"});
                 }
-            }
+            //}
 
             ctx.unlock();
             auto& qr = cq->getQueryRequest();

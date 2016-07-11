@@ -1551,9 +1551,12 @@ bool Command::run(OperationContext* txn,
     const NamespaceString nss(parseNs(db, cmd));
 
     log() << "cmd: " << cmd;
-    if (ViewCatalog::getInstance()->lookup(nss.ns())) {
-        ViewDefinition *view = ViewCatalog::getInstance()->lookup(nss.ns());
-        
+
+    AutoGetDb ctx(txn, db, MODE_IX); // I DON'T KNOW WHAT THIS MODE IS
+    Database* actualDb = ctx.getDb();
+
+    auto view = actualDb->getView(nss.ns());
+    if (view) {
         if (cmd.hasField("insert") || cmd.hasField("update") || cmd.hasField("delete") ||
             cmd.hasField("findAndModify")) {
 
@@ -1602,7 +1605,7 @@ bool Command::run(OperationContext* txn,
                         // Attempt to upsert
                         // Fake a new upsert command
                         BSONObjBuilder cmdBuilder;
-                        cmdBuilder.append("update", view->backingViewName());
+                        cmdBuilder.append("update", view->viewOn());
 
                         BSONObjBuilder updateObj;
 

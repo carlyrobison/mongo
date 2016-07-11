@@ -35,6 +35,7 @@
 #include "mongo/util/assert_util.h"
 #include "mongo/base/status.h"
 #include "mongo/base/string_data.h"
+#include "mongo/db/namespace_string.h"
 
 //#include "mongo/db/service_context.h"
 //#include "mongo/db/concurrency/write_conflict_exception.h"
@@ -45,7 +46,7 @@
 //#include "mongo/db/query/query_request.h"
 //#include "mongo/db/db_raii.h"
 
-#include "mongo/db/dbhelpers.h"
+//#include "mongo/db/dbhelpers.h"
 
 #include <string>
 #include <assert.h>

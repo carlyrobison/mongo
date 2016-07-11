@@ -739,8 +739,8 @@ Status userCreateNS(OperationContext* txn,
                    << pipeline;
 
             // when merging, make sure this matches the above command for regular views
-            return ViewCatalog::getInstance()->createView(
-                txn, dbName, viewName, backingViewName, pipeline, true);
+            collectionOptions.viewNamespace = backingViewName;
+            db->createView(txn, StringData(viewName), collectionOptions);
 
         } else { // actually just a regular collection
             LOG(3) << "JK: userCreateNS detecting an ordinary create collection command";

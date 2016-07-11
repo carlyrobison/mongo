@@ -106,7 +106,7 @@ Status ViewCatalog::createView(OperationContext* txn,
     systemViews->insertDocument(txn, viewDef, opDebug, enforceQuota);
 
     BSONObj ownedPipeline = pipeline.getOwned();
-    txn->recoveryUnit()->onCommit([this, viewName, viewOn, ownedPipeline]() {
+    txn->recoveryUnit()->onCommit([this, viewName, viewOn, ownedPipeline, timeseries]() {
         _viewMap[viewName.ns()] =
             std::make_shared<ViewDefinition>(viewName.db(), viewName.coll(), viewOn, ownedPipeline, timeseries);
     });
@@ -122,15 +122,11 @@ void ViewCatalog::dropView(OperationContext* txn, const NamespaceString& viewNam
     if (!id.isNormal())
         return;
 
-<<<<<<< HEAD
     OpDebug* opDebug = nullptr;
     systemViews->deleteDocument(txn, id, opDebug);
 
     txn->recoveryUnit()->onCommit([this, viewName]() { this->_viewMap.erase(viewName.ns()); });
 }
-=======
-ViewDefinition* ViewCatalog::lookup(StringData ns) {
->>>>>>> 27a66a9... Create timeseries collections using db.runCommand(create: <collection name>, timeseries: true).
 
 ViewDefinition* ViewCatalog::lookup(StringData ns) {
     ViewMap::const_iterator it = _viewMap.find(ns);

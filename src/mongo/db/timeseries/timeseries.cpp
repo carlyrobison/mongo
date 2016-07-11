@@ -113,7 +113,7 @@ batchIdType TimeSeriesBatch::_thisBatchId() const {
 }
 
 bool TimeSeriesBatch::save(OperationContext* txn, const std::string& ns) const {
-    Helpers::upsert(txn, ns, retrieveBatch());
+    //Helpers::upsert(txn, ns, retrieveBatch());
     return true;
 }
 
@@ -147,7 +147,7 @@ void TimeSeriesCache::loadBatch(const BSONObj& doc) {
     batchIdType batchId = doc["_id"].numberLong();
 
     // Check that the batch id doesn't already exist in memory.
-    uassert(40155, "Cannot load a batch that already exists.",
+    uassert(40189, "Cannot load a batch that already exists.",
         _cache.find(batchId) == _cache.end());
 
     // addToCache(TimeSeriesBatch(doc));
@@ -234,7 +234,7 @@ bool TimeSeriesCache::saveToCollection(){
 
 batchIdType TimeSeriesCache::evictBatch(OperationContext* txn) {
     // Step 1: Choose the least recently used batch to evict.
-    massert(40156, "Timeseries cache is empty; cannot evict from an empty cache",
+    massert(40190, "Timeseries cache is empty; cannot evict from an empty cache",
         !_lruList.empty());
 
     /* Save the batch to the underlying collection */
@@ -268,7 +268,7 @@ bool TimeSeriesCache::needsEviction() {
 
 void TimeSeriesCache::dropFromCache(batchIdType batchId) {
     /* Assert that the batch exists in the cache */
-    massert(40157, "Batch must exist in the cache", _cache.find(batchId) != _cache.end());
+    massert(40191, "Batch must exist in the cache", _cache.find(batchId) != _cache.end());
 
     /* Drop the batch from the cache */
     _cache.erase(batchId);
@@ -281,7 +281,7 @@ void TimeSeriesCache::dropFromCache(batchIdType batchId) {
 void TimeSeriesCache::addToCache(OperationContext* txn, const TimeSeriesBatch& batch) {
     batchIdType batchId = batch._thisBatchId();
 
-    massert(40158, "Batch is already in the cache", _cache.find(batchId) == _cache.end());
+    massert(40192, "Batch is already in the cache", _cache.find(batchId) == _cache.end());
 
     if (needsEviction()) { // make space in the cache
         log() << "Eviction required";
