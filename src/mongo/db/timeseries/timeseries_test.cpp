@@ -259,7 +259,7 @@ TEST(TimeSeries, Cache) {
         int j = rand() % 10000;
         builder.append("_id", Date_t::fromMillisSinceEpoch(j));
         builder.append("num", j);
-        cache.insert(&txn, builder.obj());
+        cache.insert(&txn, builder.obj(), false);
     }
 
 }
