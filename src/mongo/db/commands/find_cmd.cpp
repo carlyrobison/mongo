@@ -326,6 +326,8 @@ public:
                 // return true;
 
             //} else {
+            //log() << view->pipeline();
+
                 ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
                 if (!viewShardingCheck.canRunOnMongod()) {
                     viewShardingCheck.appendResolvedView(result);

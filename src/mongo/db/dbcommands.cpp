@@ -1639,10 +1639,10 @@ bool Command::run(OperationContext* txn,
                         // log() << newCmd;
 
                         // Create an update command.
-                        Command *update = Command::findCommand("update");
+                        /// Command *update = Command::findCommand("update");
                         //log() << update->getName();
                         // bool result = update->run(txn, db, newCmd, 0, errmsg, inPlaceReplyBob);
-                        update->run(txn, db, newCmd, 0, errmsg, inPlaceReplyBob);
+                        /// update->run(txn, db, newCmd, 0, errmsg, inPlaceReplyBob);
                         //log() << "survived saving to collection, with result " << result;
 
                         //log() << "HOORAY WE UPSERTED";

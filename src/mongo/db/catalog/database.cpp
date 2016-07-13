@@ -743,6 +743,7 @@ Status userCreateNS(OperationContext* txn,
 
             // when merging, make sure this matches the above command for regular views
             collectionOptions.viewNamespace = backingViewName;
+            collectionOptions.pipeline = pipeline;
             db->createView(txn, ns, collectionOptions);
 
         } else { // actually just a regular collection

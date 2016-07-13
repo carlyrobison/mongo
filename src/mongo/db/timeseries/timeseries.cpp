@@ -36,7 +36,11 @@
 
 #include "mongo/util/assert_util.h"
 #include "mongo/bson/bsonobjbuilder.h"
-#include <typeinfo>
+
+#include "mongo/db/ops/update_request.h"
+#include "mongo/db/ops/update.h"
+#include "mongo/db/db_raii.h"
+#include "mongo/db/ops/update_result.h"
 
 namespace mongo {
 
@@ -117,28 +121,27 @@ batchIdType TimeSeriesBatch::_thisBatchId() {
 }
 
 bool TimeSeriesBatch::save(OperationContext* txn, const NamespaceString& nss) {
-    // NOT OUR PROBLEM
+    //Create the update request
+    UpdateRequest request(nss);
+    request.setQuery(BSON("_id" << _batchId));
+    request.setUpdates(retrieveBatch());
+    request.setUpsert(true);
 
-    // Create the update request
-    // UpdateRequest request(nss);
-    // request.setQuery(BSON("_id" << _batchId));
-    // request.setUpdates(retrieveBatch());
-    // request.setUpsert(true);
+    // get the database NEEDS SERVERONLY
+    AutoGetOrCreateDb autoDb(txn, nss.db(), MODE_IX);
 
-    // // get the database NEEDS SERVERONLY
-    // AutoGetOrCreateDb autoDb(txn, nss.db(), MODE_IX);
+    // update!
+    UpdateResult result = ::mongo::update(txn, autoDb.getDb(), request);
 
-    // // update!
-    // UpdateResult result = ::mongo::update(txn, autoDb.getDb(), request);
-
-    // // See what we got
-    // log() << result;
+    // See what we got
+    log() << result;
 
     return true;
 }
 
 
 TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss) {
+    log() << "NamespaceString: " << nss.ns();
     _nss = nss;
 }
 
@@ -262,9 +265,12 @@ batchIdType TimeSeriesCache::evictBatch(OperationContext* txn) {
 
     /* Save the batch to the underlying collection */
     batchIdType toEvict = _lruList.front();
+    log() << "namespace: " << _nss.ns() << " evicting: " << toEvict;
     _cache[toEvict].save(txn, _nss);
 
+    log() << "Save OK";
     _cache.erase(toEvict);
+    log() << "Erased from cache too";
     _lruList.pop_front();
 
     return toEvict;
@@ -286,7 +292,7 @@ void TimeSeriesCache::removeFromLRUList(batchIdType batchId) {
 
 bool TimeSeriesCache::needsEviction() {
     /* Only allow 4 batches */
-    return (_lruList.size() >= 4);
+    return (_lruList.size() >= 2);
 }
 
 void TimeSeriesCache::dropFromCache(batchIdType batchId) {

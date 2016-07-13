@@ -676,6 +676,7 @@ serverOnlyFiles = [
     "stats/range_deleter_server_status.cpp",
     "stats/snapshots.cpp",
     "storage/storage_init.cpp",
+    "timeseries/timeseries.cpp",
     "ttl.cpp",
     "write_concern.cpp",
 ]
@@ -758,7 +759,7 @@ serveronlyLibdeps = [
     "storage/storage_engine_lock_file",
     "storage/storage_engine_metadata",
     "storage/storage_options",
-    "timeseries/timeseries",
+    #"timeseries/timeseries",
     "update_index_data",
     "views/view_mongod",
 ]

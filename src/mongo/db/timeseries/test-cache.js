@@ -9,33 +9,33 @@ db.dropDatabase();
 
 // Create the view
 // view can now have any name, except ones that <existing collection>_timeseries
-db.runCommand({"create": "timeseriesview", "timeseries": "true"});
+db.runCommand({"create": "tsv", "timeseries": "true"});
 
 // Insert some dates
-db.timeseriesview.insert({"_id": new Date(2118), "val": "eu8a4"});
-db.timeseriesview.insert({"_id": new Date(9655), "val": "xd2ii"});
-db.timeseriesview.insert({"_id": new Date(915), "val": "dznto"});
-db.timeseriesview.insert({"_id": new Date(5098), "val": "jyk1v"});
-db.timeseriesview.insert({"_id": new Date(6902), "val": "c0cx6"});
-db.timeseriesview.insert({"_id": new Date(2975), "val": "pis87"});
-db.timeseriesview.insert({"_id": new Date(2420), "val": "op4qy"});
-db.timeseriesview.insert({"_id": new Date(526), "val": "leky4"});
+db.tsv.insert({"_id": new Date(2118), "val": "eu8a4"});
+db.tsv.insert({"_id": new Date(9655), "val": "xd2ii"});
+db.tsv.insert({"_id": new Date(915), "val": "dznto"});
+db.tsv.insert({"_id": new Date(5098), "val": "jyk1v"});
+db.tsv.insert({"_id": new Date(6902), "val": "c0cx6"});
+db.tsv.insert({"_id": new Date(2975), "val": "pis87"});
+db.tsv.insert({"_id": new Date(2420), "val": "op4qy"});
+db.tsv.insert({"_id": new Date(526), "val": "leky4"});
 
 // Extract some dates
-db.timeseriesview.find({"_id": new Date(2118)});
-db.timeseriesview.find({"_id": new Date(9655)});
-db.timeseriesview.find({"_id": new Date(915)});
-db.timeseriesview.find({"_id": new Date(5098)});
-db.timeseriesview.find({"_id": new Date(6902)});
-db.timeseriesview.find({"_id": new Date(2975)});
-db.timeseriesview.find({"_id": new Date(2420)});
-db.timeseriesview.find({"_id": new Date(526)});
+db.tsv.find({"_id": new Date(2118)});
+db.tsv.find({"_id": new Date(9655)});
+db.tsv.find({"_id": new Date(915)});
+db.tsv.find({"_id": new Date(5098)});
+db.tsv.find({"_id": new Date(6902)});
+db.tsv.find({"_id": new Date(2975)});
+db.tsv.find({"_id": new Date(2420)});
+db.tsv.find({"_id": new Date(526)});
 
 // Try to extract some that don't exist
-db.timeseriesview.find({"_id": new Date(6014)});
+db.tsv.find({"_id": new Date(6014)});
 
 // Try to insert/extract some with invalid types
-db.timeseriesview.insert({"_id": 6058, "val": 6610});
-db.timeseriesview.find({"_id": 6058});
+db.tsv.insert({"_id": 6058, "val": 6610});
+db.tsv.find({"_id": 6058});
 
-//console.log(db.timeseriesview.find({}));
+//console.log(db.tsv.find({}));
