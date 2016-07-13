@@ -56,7 +56,7 @@ ViewDefinition::ViewDefinition(StringData dbName,
       _timeseries(timeseries)
     {
     if (timeseries) {
-        tsCache = new TimeSeriesCache();
+        tsCache = new TimeSeriesCache(NamespaceString(viewOn));
     }
     for (BSONElement e : pipeline) {
         _pipeline.push_back(e.Obj().getOwned());

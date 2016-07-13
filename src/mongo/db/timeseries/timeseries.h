@@ -28,30 +28,16 @@
 *    it in the license file.
 */
 
+#pragma once
+
 #include "mongo/bson/bsonobj.h"
-#include "mongo/bson/bsonobjbuilder.h"
-#include "mongo/db/jsobj.h"
 #include "mongo/util/time_support.h"
-#include "mongo/util/assert_util.h"
-#include "mongo/base/status.h"
-#include "mongo/base/string_data.h"
 #include "mongo/db/namespace_string.h"
-
-//#include "mongo/db/service_context.h"
-//#include "mongo/db/concurrency/write_conflict_exception.h"
-//#include "mongo/db/catalog/collection.h"
-//#include "mongo/db/curop.h"
-//#include "mongo/db/commands.h"
-//#include "mongo/db/client.h"
-//#include "mongo/db/query/query_request.h"
-//#include "mongo/db/db_raii.h"
-
-//#include "mongo/db/dbhelpers.h"
 
 #include <string>
 #include <assert.h>
-
-#pragma once
+#include <map>
+#include <list>
 
 namespace mongo {
 
@@ -87,7 +73,7 @@ public:
      */
     TimeSeriesBatch(const BSONObj& batchDocument);
 
-    TimeSeriesBatch() = default;
+    TimeSeriesBatch() {};
 
     /**
      * Inserts a document into the time series DB.
@@ -103,7 +89,7 @@ public:
     void update(const BSONObj& doc);
 
     /* Retrieves the single BSONObj for the batch document. */
-    BSONObj retrieveBatch() const;
+    BSONObj retrieveBatch();
 
     /* Retrieves a batch document for a given timestamp */
     BSONObj retrieve(const Date_t& time);
@@ -112,10 +98,10 @@ public:
     void remove(const Date_t& time);
 
     /* Reports this batch's batch Id */
-    batchIdType _thisBatchId() const;
+    batchIdType _thisBatchId();
 
     /* Saves a specific batch to a collection */
-    bool save(OperationContext* txn, const std::string& ns) const;
+    bool save(OperationContext* txn, const NamespaceString& nss);
 
     /* Assuming this is the deconstructor. Saves the contents of the buffer
      * (on disk?) and disappears */
@@ -136,9 +122,8 @@ private:
  */
 class TimeSeriesCache {
 public:
-    TimeSeriesCache() = default;
 
-    TimeSeriesCache(NamespaceString nss);
+    TimeSeriesCache(const NamespaceString& nss);
 
     /* Inserts a document into the corresponding batch.
      * Creates the batch if necessary. */
@@ -198,7 +183,7 @@ private:
     void dropFromCache(batchIdType batchId);
 
     /* Adds to the cache, updates the LRU list, determines if eviction needed... */
-    void addToCache(OperationContext* txn, const TimeSeriesBatch& batch);
+    void addToCache(OperationContext* txn, TimeSeriesBatch& batch);
 
     /* Queue for LRU part of cache: least recently used is at the front, we add
      * new elements to the back */

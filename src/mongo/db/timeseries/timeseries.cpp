@@ -34,6 +34,10 @@
 #include "mongo/db/timeseries/timeseries.h"
 #include "mongo/util/log.h"
 
+#include "mongo/util/assert_util.h"
+#include "mongo/bson/bsonobjbuilder.h"
+#include <typeinfo>
+
 namespace mongo {
 
 TimeSeriesBatch::TimeSeriesBatch(const BSONObj& batchDocument) {
@@ -75,7 +79,7 @@ void TimeSeriesBatch::update(const BSONObj& doc) {
 	_docs[date] = newDoc;
 }
 
-BSONObj TimeSeriesBatch::retrieveBatch() const {
+BSONObj TimeSeriesBatch::retrieveBatch() {
     // create the BSON array
     BSONArrayBuilder arrayBuilder;
 
@@ -108,17 +112,33 @@ void TimeSeriesBatch::remove(const Date_t& time) {
 	_docs.erase(time);
 }
 
-batchIdType TimeSeriesBatch::_thisBatchId() const {
+batchIdType TimeSeriesBatch::_thisBatchId() {
     return _batchId;
 }
 
-bool TimeSeriesBatch::save(OperationContext* txn, const std::string& ns) const {
-    //Helpers::upsert(txn, ns, retrieveBatch());
+bool TimeSeriesBatch::save(OperationContext* txn, const NamespaceString& nss) {
+    // NOT OUR PROBLEM
+
+    // Create the update request
+    // UpdateRequest request(nss);
+    // request.setQuery(BSON("_id" << _batchId));
+    // request.setUpdates(retrieveBatch());
+    // request.setUpsert(true);
+
+    // // get the database NEEDS SERVERONLY
+    // AutoGetOrCreateDb autoDb(txn, nss.db(), MODE_IX);
+
+    // // update!
+    // UpdateResult result = ::mongo::update(txn, autoDb.getDb(), request);
+
+    // // See what we got
+    // log() << result;
+
     return true;
 }
 
 
-TimeSeriesCache::TimeSeriesCache(NamespaceString nss) {
+TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss) {
     _nss = nss;
 }
 
@@ -131,15 +151,31 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, bool per
     if (_cache.find(batchId) == _cache.end()) {
         // Eventually, should try to load it from the collection.
     	// Batch does not exist, create one.
-        addToCache(txn, TimeSeriesBatch(batchId));
+        TimeSeriesBatch newBatch(batchId);
+        addToCache(txn, newBatch);
     } else { // Simply add it to the LRU cache
         addToLRUList(batchId);
     }
 
-    _cache[batchId].insert(doc);
+    assert(_cache.find(batchId) != _cache.end());
+
+    auto batch2 = _cache.find(batchId);
+    log() << typeid(batch2).name();
+
+    if (batch2 != _cache.end()) {
+        //batch2.insert(doc);
+    } else {
+        log() << "Couldn't find batch we just inserted";
+    }
+
+    auto& batch = _cache[batchId];
+
+    log() << typeid(batch).name();
+
+    //batch.insert(doc);
 
     if (persistent) {
-        _cache[batchId].save(txn, _nss.ns());
+        _cache[batchId].save(txn, _nss);
     }
 }
 
@@ -239,7 +275,7 @@ batchIdType TimeSeriesCache::evictBatch(OperationContext* txn) {
 
     /* Save the batch to the underlying collection */
     batchIdType toEvict = _lruList.front();
-    _cache[toEvict].save(txn, _nss.ns());
+    _cache[toEvict].save(txn, _nss);
 
     _cache.erase(toEvict);
     _lruList.pop_front();
@@ -278,7 +314,7 @@ void TimeSeriesCache::dropFromCache(batchIdType batchId) {
 }
 
 /* Adds to the cache, updates the LRU list, determines if eviction needed... */
-void TimeSeriesCache::addToCache(OperationContext* txn, const TimeSeriesBatch& batch) {
+void TimeSeriesCache::addToCache(OperationContext* txn, TimeSeriesBatch& batch) {
     batchIdType batchId = batch._thisBatchId();
 
     massert(40192, "Batch is already in the cache", _cache.find(batchId) == _cache.end());
@@ -288,7 +324,7 @@ void TimeSeriesCache::addToCache(OperationContext* txn, const TimeSeriesBatch& b
         log() << "Evicted batch: " << evictBatch(txn);
     }
 
-    _cache[batchId] = batch; // add the batch to the cache
+    _cache.emplace(batchId, batch); // add the batch to the cache
     addToLRUList(batchId);
 
     log() << "Added batch: " << batchId << " to the cache";

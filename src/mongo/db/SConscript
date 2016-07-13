@@ -758,7 +758,7 @@ serveronlyLibdeps = [
     "storage/storage_engine_lock_file",
     "storage/storage_engine_metadata",
     "storage/storage_options",
-    #"timeseries/timeseries",
+    "timeseries/timeseries",
     "update_index_data",
     "views/view_mongod",
 ]

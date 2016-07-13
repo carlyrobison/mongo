@@ -1550,31 +1550,36 @@ bool Command::run(OperationContext* txn,
 
     const NamespaceString nss(parseNs(db, cmd));
 
-    log() << "cmd: " << cmd;
+    log() << "cmd: " << cmd << " db: " << db;
 
-    AutoGetDb ctx(txn, db, MODE_IX); // I DON'T KNOW WHAT THIS MODE IS
-    Database* actualDb = ctx.getDb();
+    if (cmd.hasField("insert") || cmd.hasField("update") || cmd.hasField("delete") ||
+        cmd.hasField("findAndModify")) {
 
-    auto view = actualDb->getView(nss.ns());
-    if (view) {
-        if (cmd.hasField("insert") || cmd.hasField("update") || cmd.hasField("delete") ||
-            cmd.hasField("findAndModify")) {
+        // Should have a real DB if we are doing any of these operations
+        AutoGetDb ctx(txn, db, MODE_IX);
+        log() << "AutoGot DB";
+        Database* actualDb = ctx.getDb();
+        log() << "Got DB pointer";
+        auto view = actualDb->getViewCatalog()->lookup(StringData(nss.ns()));
+        log() << "Survived getting the view" << view->toString();
 
+        if (view) {
+            log() << "It's a view, trying to modify";
             if (view->isWritable()) {
-                // log() << "It's a view, trying to modify";
                 log() << cmd;
                 // log() << view->toString();
                 // Detect a time series view.
                 if (cmd.hasField("insert") && (view->isTimeSeries())) {
                     // log() << "Detected time series view insert attempt";
-                    // log() << cmd.getField("documents");
+                    log() << cmd.getField("documents");
 
                     // Setup for inserting saved documents
 
                     // Insert the documents into the in-memory data buffer
+                    // Do each document in series
                     for (auto doc : cmd.getField("documents").Obj()) {
                         BSONObj obj = doc.Obj();
-                        // log() << "Inserting " << obj;
+                        log() << "Inserting " << obj;
 
                         uassert(ErrorCodes::UnsupportedFormat, "_id field required on insert to timeseries.",
                             obj.hasField("_id"));
@@ -1593,6 +1598,8 @@ bool Command::run(OperationContext* txn,
                         }
                         BSONObj docToInsert = builder.obj();
                         // log() << "constructed " << docToInsert;
+
+                        // insert to timeseries returns boost::optional<BSONArray> 
 
                         // insert the object into the in-memory data store
                         view->getTSCache()->insert(txn, docToInsert);
