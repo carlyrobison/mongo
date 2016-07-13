@@ -9,7 +9,7 @@ env.Library(
     ],
      LIBDEPS=[
         '$BUILD_DIR/mongo/base',
-        #'$BUILD_DIR/mongo/db/service_context',
+        '$BUILD_DIR/mongo/db/service_context',
         #'$BUILD_DIR/mongo/db/serveronly',
         #'$BUILD_DIR/mongo/db/commands',
         #'$BUILD_DIR/mongo/db/commands/core'
@@ -23,7 +23,6 @@ env.CppUnitTest(
             'timeseries_test.cpp',
         ],
         LIBDEPS=[
-            '$BUILD_DIR/mongo/base',
-            '$BUILD_DIR/mongo/db/timeseries/timeseries'
+            '$BUILD_DIR/mongo/db/timeseries/timeseries',
         ],
 )

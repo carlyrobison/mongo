@@ -534,7 +534,7 @@ void Database::createView(OperationContext* txn, StringData ns, const Collection
 
     LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
            << options.viewNamespace << " with pipeline " << options.pipeline;
-    uassertStatusOK(_views->createView(txn, nss, options.viewNamespace, options.pipeline));
+    uassertStatusOK(_views->createView(txn, nss, options.viewNamespace, options.pipeline, options.timeseries));
 }
 
 
@@ -644,7 +644,7 @@ Status userCreateNS(OperationContext* txn,
                     bool createDefaultIndexes) {
     invariant(db);
 
-    LOG(1) << "create collection " << ns << ' ' << options;
+    //log() << "create collection " << ns << ' ' << options;
 
     if (!NamespaceString::validCollectionComponent(ns))
         return Status(ErrorCodes::InvalidNamespace, str::stream() << "invalid ns: " << ns);
@@ -711,17 +711,20 @@ Status userCreateNS(OperationContext* txn,
              * be the view name, and we create a backing collection, which is just ".timeseries"
              * appended to the desired name.
              */
+            //log() << " Creating timeseries under namespace " << ns;
+
             NamespaceString nss(ns);
             std::string viewName = nss.coll().toString(); // the desired name
             std::string dbName = nss.db().toString();
 
             // Create the backing collection
             std::string backingViewName = viewName + "_" + "timeseries";
-            StringData backingNS = NamespaceString(dbName, backingViewName).ns();
+            std::string backingNS = NamespaceString(dbName, backingViewName).ns();
             uassert(ErrorCodes::NamespaceExists, "TS name conflicts with existing collection " + backingViewName,
-                db->getCollection(backingNS.toString()) == NULL);
-            invariant(db->createCollection(txn, backingNS, collectionOptions, createDefaultIndexes));
+                db->getCollection(backingNS) == NULL);
+            invariant(db->createCollection(txn, StringData(backingNS), collectionOptions, createDefaultIndexes));
             
+
             // Construct the pipeline
             // Trying to get: {[{$unwind: "_$docs"}]}
             BSONArrayBuilder arrBuilder;
@@ -740,7 +743,7 @@ Status userCreateNS(OperationContext* txn,
 
             // when merging, make sure this matches the above command for regular views
             collectionOptions.viewNamespace = backingViewName;
-            db->createView(txn, StringData(viewName), collectionOptions);
+            db->createView(txn, ns, collectionOptions);
 
         } else { // actually just a regular collection
             LOG(3) << "JK: userCreateNS detecting an ordinary create collection command";

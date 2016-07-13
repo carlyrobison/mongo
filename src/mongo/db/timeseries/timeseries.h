@@ -33,6 +33,7 @@
 #include "mongo/bson/bsonobj.h"
 #include "mongo/util/time_support.h"
 #include "mongo/db/namespace_string.h"
+#include "mongo/db/service_context.h"
 
 #include <string>
 #include <assert.h>
@@ -124,6 +125,8 @@ class TimeSeriesCache {
 public:
 
     TimeSeriesCache(const NamespaceString& nss);
+
+    //TimeSeriesCache() {};
 
     /* Inserts a document into the corresponding batch.
      * Creates the batch if necessary. */

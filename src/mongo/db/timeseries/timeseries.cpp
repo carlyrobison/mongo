@@ -157,22 +157,9 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, bool per
         addToLRUList(batchId);
     }
 
-    assert(_cache.find(batchId) != _cache.end());
+    massert(40193, "TimeSeriesCache::insert | Still no batch to insert into", _cache.find(batchId) != _cache.end());
 
-    auto batch2 = _cache.find(batchId);
-    log() << typeid(batch2).name();
-
-    if (batch2 != _cache.end()) {
-        //batch2.insert(doc);
-    } else {
-        log() << "Couldn't find batch we just inserted";
-    }
-
-    auto& batch = _cache[batchId];
-
-    log() << typeid(batch).name();
-
-    //batch.insert(doc);
+    _cache[batchId].insert(doc);
 
     if (persistent) {
         _cache[batchId].save(txn, _nss);

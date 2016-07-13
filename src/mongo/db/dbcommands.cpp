@@ -1550,28 +1550,33 @@ bool Command::run(OperationContext* txn,
 
     const NamespaceString nss(parseNs(db, cmd));
 
-    log() << "cmd: " << cmd << " db: " << db;
+    //log() << "cmd: " << cmd << " db: " << db;
 
     if (cmd.hasField("insert") || cmd.hasField("update") || cmd.hasField("delete") ||
         cmd.hasField("findAndModify")) {
 
-        // Should have a real DB if we are doing any of these operations
-        AutoGetDb ctx(txn, db, MODE_IX);
-        log() << "AutoGot DB";
-        Database* actualDb = ctx.getDb();
-        log() << "Got DB pointer";
-        auto view = actualDb->getViewCatalog()->lookup(StringData(nss.ns()));
-        log() << "Survived getting the view" << view->toString();
+      // Should have a real DB if we are doing any of these operations
+      AutoGetDb ctx(txn, db, MODE_IX);
+      //log() << "AutoGot DB";
+      Database* actualDb = ctx.getDb();
+      //log() << "Got DB pointer";
+      
+      if(actualDb) {
 
-        if (view) {
-            log() << "It's a view, trying to modify";
+        auto viewCatalog = actualDb->getViewCatalog();
+        //log() << "Survived getting the view catalog ";
+
+        if (viewCatalog && viewCatalog->lookup(StringData(nss.ns()))) {
+            //log() << "It's a view, trying to modify";
+            auto view = viewCatalog->lookup(StringData(nss.ns()));
+            //log() << "got view " << view->toString();
             if (view->isWritable()) {
-                log() << cmd;
+                //log() << cmd << " view is writable";
                 // log() << view->toString();
                 // Detect a time series view.
                 if (cmd.hasField("insert") && (view->isTimeSeries())) {
                     // log() << "Detected time series view insert attempt";
-                    log() << cmd.getField("documents");
+                    // log() << cmd.getField("documents");
 
                     // Setup for inserting saved documents
 
@@ -1661,6 +1666,7 @@ bool Command::run(OperationContext* txn,
               return result;
             }
         }
+      }
     }
 
     StatusWith<WriteConcernOptions> wcResult =
