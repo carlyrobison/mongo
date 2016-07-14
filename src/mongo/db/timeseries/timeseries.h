@@ -76,6 +76,8 @@ public:
 
     TimeSeriesBatch() {};
 
+    std::string toString(bool incldeTime = false) const;
+
     /**
      * Inserts a document into the time series DB.
      * Assume that the document's ID is a time.
@@ -128,12 +130,14 @@ public:
 
     //TimeSeriesCache() {};
 
+    std::string toString(bool printBatches = false) const;
+
     /* Inserts a document into the corresponding batch.
      * Creates the batch if necessary. */
     void insert(OperationContext* txn, const BSONObj& doc, bool persistent = false);
 
     /* Loads a batch into the cache and the cache list */
-    void loadBatch(const BSONObj& doc);
+    BSONObj findBatch(OperationContext* txn, batchIdType batchId);
 
     /* Updates a document in the corresponding batch.
      * Checks for space? Updates LRU list */

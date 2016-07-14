@@ -1611,31 +1611,31 @@ bool Command::run(OperationContext* txn,
                         // log() << "Insert of " << docToInsert << " completed.";
 
                         // Get batch to save to the backing collection
-                        BSONObj toSave = view->getTSCache()->retrieveBatch(docToInsert.getField("_id").Date());
-                        // log() << "saving" << toSave;
+                        // BSONObj toSave = view->getTSCache()->retrieveBatch(docToInsert.getField("_id").Date());
+                        // // log() << "saving" << toSave;
 
-                        // Attempt to upsert
-                        // Fake a new upsert command
-                        BSONObjBuilder cmdBuilder;
-                        cmdBuilder.append("update", view->viewOn());
+                        // // Attempt to upsert
+                        // // Fake a new upsert command
+                        // BSONObjBuilder cmdBuilder;
+                        // cmdBuilder.append("update", view->viewOn());
 
-                        BSONObjBuilder updateObj;
+                        // BSONObjBuilder updateObj;
 
-                        // Create query
-                        BSONObjBuilder query;
-                        query.append("_id", toSave.getField("_id").Long());
-                        updateObj.append("q", query.obj());
-                        // Add the other parts
-                        updateObj.append("u", toSave);
-                        updateObj.append("multi", false);
-                        updateObj.append("upsert", true);
+                        // // Create query
+                        // BSONObjBuilder query;
+                        // query.append("_id", toSave.getField("_id").Long());
+                        // updateObj.append("q", query.obj());
+                        // // Add the other parts
+                        // updateObj.append("u", toSave);
+                        // updateObj.append("multi", false);
+                        // updateObj.append("upsert", true);
 
-                        BSONArrayBuilder updateArray;
-                        updateArray.append(updateObj.obj());
-                        cmdBuilder.append("updates", updateArray.arr());
-                        cmdBuilder.append("ordered", true);
+                        // BSONArrayBuilder updateArray;
+                        // updateArray.append(updateObj.obj());
+                        // cmdBuilder.append("updates", updateArray.arr());
+                        // cmdBuilder.append("ordered", true);
 
-                        BSONObj newCmd = cmdBuilder.obj();
+                        // BSONObj newCmd = cmdBuilder.obj();
                         // log() << newCmd;
 
                         // Create an update command.
