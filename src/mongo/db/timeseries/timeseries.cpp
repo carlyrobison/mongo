@@ -153,7 +153,7 @@ bool TimeSeriesBatch::save(OperationContext* txn, const NamespaceString& nss) {
 
     // See what we got
     //log() << "result of save: " << result;
-    massert(result.numMatched == 1);
+    //massert(result.numMatched == 1);
 
     return true;
 }
@@ -374,15 +374,15 @@ void TimeSeriesCache::addToCache(OperationContext* txn, TimeSeriesBatch& batch) 
     massert(40192, "Batch is already in the cache", _cache.find(batchId) == _cache.end());
 
     if (needsEviction()) { // make space in the cache
-        //log() << "Eviction required";
-        //log() << "Evicted batch: " << evictBatch(txn);
+        LOG(2) << "Eviction required";
+        LOG(2) << "Evicted batch: " << evictBatch(txn);
         evictBatch(txn);
     }
 
     _cache.emplace(batchId, batch); // add the batch to the cache
     addToLRUList(batchId);
 
-    //log() << "Added batch number: " << batchId << " to the cache";
+    LOG(2) << "Added batch number: " << batchId << " to the cache";
 }
 
 

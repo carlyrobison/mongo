@@ -1584,7 +1584,7 @@ bool Command::run(OperationContext* txn,
                     // Do each document in series
                     for (auto doc : cmd.getField("documents").Obj()) {
                         BSONObj obj = doc.Obj();
-                        log() << "Inserting " << obj;
+                        LOG(2) << "Inserting " << obj;
 
                         uassert(ErrorCodes::UnsupportedFormat, "_id field required on insert to timeseries.",
                             obj.hasField("_id"));
