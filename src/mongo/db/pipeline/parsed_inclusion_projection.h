@@ -142,6 +142,8 @@ private:
      */
     bool subtreeContainsComputedFields() const;
 
+// Protected not private because ComputedNode inherits from this class
+protected:
     std::string _pathToNode;
 
     // Our projection semantics are such that all field additions need to be processed in the order
@@ -157,6 +159,7 @@ private:
     StringMap<boost::intrusive_ptr<Expression>> _expressions;
     std::unordered_set<std::string> _inclusions;
 
+private:
     // TODO use StringMap once SERVER-23700 is resolved.
     std::unordered_map<std::string, std::unique_ptr<InclusionNode>> _children;
 };

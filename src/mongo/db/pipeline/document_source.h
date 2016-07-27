@@ -50,6 +50,7 @@
 #include "mongo/db/pipeline/expression.h"
 #include "mongo/db/pipeline/expression_context.h"
 #include "mongo/db/pipeline/lookup_set_cache.h"
+#include "mongo/db/pipeline/parsed_add_fields.h"
 #include "mongo/db/pipeline/parsed_aggregation_projection.h"
 #include "mongo/db/pipeline/pipeline.h"
 #include "mongo/db/pipeline/value.h"
@@ -1887,5 +1888,47 @@ public:
 private:
     bool _latencySpecified = false;
     bool _finished = false;
+};
+
+class DocumentSourceAddFields final : public DocumentSource {
+public:
+    boost::optional<Document> getNext() final;
+    const char* getSourceName() const final;
+    Value serialize(bool explain = false) const final;
+    void dispose() final;
+
+    /**
+     * Adds any paths that are included via this projection, or that are referenced by any
+     * expressions.
+     */
+    GetDepsReturn getDependencies(DepsTracker* deps) const final;
+
+    /**
+     * Attempt to move a subsequent $skip or $limit stage before the $project, thus reducing the
+     * number of documents that pass through this stage.
+     */
+    Pipeline::SourceContainer::iterator optimizeAt(Pipeline::SourceContainer::iterator itr,
+                                                   Pipeline::SourceContainer* container) final;
+
+    /**
+     * Optimize any expressions being used in this stage.
+     */
+    boost::intrusive_ptr<DocumentSource> optimize() final;
+
+    void doInjectExpressionContext() final;
+
+    /**
+     * Parse the projection from the user-supplied BSON.
+     */
+    static boost::intrusive_ptr<DocumentSource> createFromBson(
+        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+
+private:
+    DocumentSourceAddFields(const boost::intrusive_ptr<ExpressionContext>& expCtx,
+        std::unique_ptr<parsed_aggregation_projection::ParsedAddFields> _parsedAddFields);
+
+    // ParsedAddFields derives from ParsedAggregationProjection but does not remove all original
+    // fields before adding new ones.
+    std::unique_ptr<parsed_aggregation_projection::ParsedAddFields> _parsedAddFields;
 };
 }  // namespace mongo

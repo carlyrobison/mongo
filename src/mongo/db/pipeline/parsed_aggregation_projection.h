@@ -40,7 +40,7 @@ struct ExpressionContext;
 
 namespace parsed_aggregation_projection {
 
-enum class ProjectionType { kExclusion, kInclusion };
+enum class ProjectionType { kExclusion, kInclusion, kComputed };
 
 /**
  * A ParsedAggregationProjection is responsible for parsing and executing a projection. It
