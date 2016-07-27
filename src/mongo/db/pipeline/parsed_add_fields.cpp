@@ -42,48 +42,6 @@ using std::string;
 using std::unique_ptr;
 
 //
-// ComputedNode
-//
-ComputedNode::ComputedNode(std::string pathToNode) : InclusionNode(pathToNode) {}
-
-void ComputedNode::serialize(MutableDocument* output, bool explain) const {
-    for (auto&& field : _orderToProcessAdditionsAndChildren) {
-        log() << "Processing field: " << field;
-        auto childIt = _children.find(field);
-        if (childIt != _children.end()) {
-            log() << "Field is a child.";
-            MutableDocument subDoc;
-            childIt->second->serialize(&subDoc, explain);
-            output->addField(field, subDoc.freezeToValue());
-        } else {
-            log() << "Assuming field is an expression?: " << (_expressions.end() != _expressions.find(field));
-            auto expressionIt = _expressions.find(field);
-            invariant(expressionIt != _expressions.end());
-            output->addField(field, expressionIt->second->serialize(explain));
-        }
-    }
-}
-
-ComputedNode* ComputedNode::addOrGetChild(std::string field) {
-    auto child = getChild(field);
-    return child ? child : addChild(field);
-}
-
-ComputedNode* ComputedNode::getChild(string field) const {
-    auto childIt = _children.find(field);
-    return childIt == _children.end() ? nullptr : childIt->second.get();
-}
-
-ComputedNode* ComputedNode::addChild(string field) {
-    invariant(!str::contains(field, "."));
-    _orderToProcessAdditionsAndChildren.push_back(field);
-    auto childPath = FieldPath::getFullyQualifiedPath(_pathToNode, field);
-    auto insertedPair = _children.emplace(
-        std::make_pair(std::move(field), stdx::make_unique<ComputedNode>(std::move(childPath))));
-    return insertedPair.first->second.get();
-}
-
-//
 // ParsedAddFields
 //
 
@@ -164,7 +122,7 @@ bool ParsedAddFields::parseObjectAsExpression(StringData pathToObject,
 
 void ParsedAddFields::parseSubObject(const BSONObj& subObj,
                                      const VariablesParseState& variablesParseState,
-                                     ComputedNode* node) {
+                                     InclusionNode* node) {
     log() << "Parsing sub obj: " << subObj;
     for (auto elem : subObj) {
         invariant(elem.fieldName()[0] != '$');

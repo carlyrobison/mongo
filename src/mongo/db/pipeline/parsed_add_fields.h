@@ -46,44 +46,6 @@ class Value;
 namespace parsed_aggregation_projection {
 
 /**
- * A node used to define the parsed structure of an addFields, also known as an addition projection.
- * Each AdditionNode represents one 'level' of the parsed specification. The root AdditionNode
- * represents all top level additions, with any child AdditionNodes representing dotted or nested
- * additions.
- */
-class ComputedNode : public InclusionNode {
-public:
-    ComputedNode(std::string pathToNode = "");
-
-    /**
-     * Serialize this addition. Overwrites InclusionNode's serialize method to only include the _id 
-     * when it was explicitly computed.
-     */
-    void serialize(MutableDocument* output, bool explain) const;
-
-    /**
-     * Creates the child if it doesn't already exist. 'field' is not allowed to be dotted.
-     * Overwrites InclusionNode's addOrGetChild method to return a ComputedNode field.
-     */
-    ComputedNode* addOrGetChild(std::string field);
-
-private:
-    /**
-     * Returns nullptr if no such child exists. Overwrites getChild from InclusionNode.
-     */
-    ComputedNode* getChild(std::string field) const;
-
-    /**
-     * Adds a new ComputedNode as a child. 'field' cannot be dotted. Overwrites addChild from
-     * InclusionNode.
-     */
-    ComputedNode* addChild(std::string field);
-
-    // TODO use StringMap once SERVER-23700 is resolved.
-    std::unordered_map<std::string, std::unique_ptr<ComputedNode>> _children;
-};
-
-/**
  * A ParsedAddFields represents a parsed form of the raw BSON specification for the AddFields
  * stage.
  *
@@ -93,7 +55,7 @@ private:
  */
 class ParsedAddFields : public ParsedAggregationProjection {
 public:
-    ParsedAddFields() : ParsedAggregationProjection(), _root(new ComputedNode()) {}
+    ParsedAddFields() : ParsedAggregationProjection(), _root(new InclusionNode()) {}
 
     /**
      * Creates the data needed to perform an AddFields.
@@ -179,10 +141,10 @@ private:
      */
     void parseSubObject(const BSONObj& subObj,
                         const VariablesParseState& variablesParseState,
-                        ComputedNode* node);
+                        InclusionNode* node);
 
     // The AdditionNode tree does most of the execution work once constructed.
-    std::unique_ptr<ComputedNode> _root;
+    std::unique_ptr<InclusionNode> _root;
 
     // This is needed to give the expressions knowledge about the context in which they are being
     // executed.

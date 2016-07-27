@@ -3969,7 +3969,7 @@ TEST_F(AddFieldsTest, ProcessesMultipleDocuments) {
 TEST_F(AddFieldsTest, AddsDependenciesOfIncludedAndComputedFields) {
     createAddFields(fromjson("{a: true, x: '$b', y: {$and: ['$c','$d']}, z: {$meta: 'textScore'}}"));
     DepsTracker dependencies(DepsTracker::MetadataAvailable::kTextScore);
-    ASSERT_EQUALS(DocumentSource::EXHAUSTIVE_FIELDS, addFields()->getDependencies(&dependencies));
+    ASSERT_EQUALS(DocumentSource::SEE_NEXT, addFields()->getDependencies(&dependencies));
     ASSERT_EQUALS(3U, dependencies.fields.size());
 
     // No implicit _id dependency.

@@ -62,7 +62,7 @@ public:
     /**
      * Serialize this projection.
      */
-    void serialize(MutableDocument* output, bool explain) const;
+    virtual void serialize(MutableDocument* output, bool explain) const;
 
     /**
      * Adds dependencies of any fields that need to be included, or that are used by any
@@ -159,7 +159,6 @@ protected:
     StringMap<boost::intrusive_ptr<Expression>> _expressions;
     std::unordered_set<std::string> _inclusions;
 
-private:
     // TODO use StringMap once SERVER-23700 is resolved.
     std::unordered_map<std::string, std::unique_ptr<InclusionNode>> _children;
 };
