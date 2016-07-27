@@ -50,6 +50,7 @@
 #include "mongo/db/pipeline/expression.h"
 #include "mongo/db/pipeline/expression_context.h"
 #include "mongo/db/pipeline/lookup_set_cache.h"
+#include "mongo/db/pipeline/parsed_add_fields.h"
 #include "mongo/db/pipeline/parsed_aggregation_projection.h"
 #include "mongo/db/pipeline/pipeline.h"
 #include "mongo/db/pipeline/value.h"
@@ -2020,5 +2021,52 @@ private:
     std::unique_ptr<Variables> _variables;
     boost::intrusive_ptr<Expression> _groupByExpression;
     long long _nDocuments = 0;
+};
+
+/**
+ * $addFields adds or replaces the specified fields to/in the document while preserving the original
+ * document. Is modeled on and throws the same errors as $project.
+ */
+class DocumentSourceAddFields final : public DocumentSource {
+public:
+    // virtuals from DocumentSource.
+    boost::optional<Document> getNext() final;
+    const char* getSourceName() const final;
+    boost::intrusive_ptr<DocumentSource> optimize() final;
+    Value serialize(bool explain = false) const final;
+    void dispose() final;
+
+    /**
+     * Adds any paths that are included via this stage, or that are referenced by any expressions.
+     */
+    GetDepsReturn getDependencies(DepsTracker* deps) const final;
+
+    /**
+     * Attempt to move a subsequent $skip or $limit stage before the addFields, thus reducing the
+     * number of documents that pass through this stage.
+     */
+    Pipeline::SourceContainer::iterator optimizeAt(Pipeline::SourceContainer::iterator itr,
+                                                   Pipeline::SourceContainer* container) final;
+
+    /**
+     * Adds the expression context to each of the expressions so that they can evaluate from the
+     * input document.
+     */
+    void doInjectExpressionContext() final;
+
+    /**
+     * Parse the $addFields from the user-supplied BSON.
+     */
+    static boost::intrusive_ptr<DocumentSource> createFromBson(
+        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+
+private:
+    DocumentSourceAddFields(
+        const boost::intrusive_ptr<ExpressionContext>& expCtx,
+        std::unique_ptr<parsed_aggregation_projection::ParsedAddFields> parsedAddFields);
+
+    // ParsedAddFields derives from ParsedAggregationProjection but does not remove all original
+    // fields before adding new ones.
+    std::unique_ptr<parsed_aggregation_projection::ParsedAddFields> _parsedAddFields;
 };
 }  // namespace mongo

@@ -28,8 +28,13 @@
 
 #pragma once
 
+#include "mongo/platform/basic.h"
+
 #include <boost/intrusive_ptr.hpp>
 #include <memory>
+
+#include "mongo/bson/bsonelement.h"
+#include "mongo/db/pipeline/field_path.h"
 
 namespace mongo {
 
@@ -40,10 +45,68 @@ struct ExpressionContext;
 
 namespace parsed_aggregation_projection {
 
-enum class ProjectionType { kExclusion, kInclusion };
+enum class ProjectionType { kExclusion, kInclusion, kComputed };
 
 /**
- * A ParsedAggregationProjection is responsible for parsing and executing a projection. It
+ * This class ensures that the specification was valid: that none of the paths specified conflict
+ * with one another, that there is at least one field, etc. Here "projection" includes both
+ * $project specifications and $addFields specifications.
+ */
+class ProjectionSpecValidator {
+
+public:
+    /**
+     * Returns a Status -- with an error number and message if the specification is invalid,
+     * or Status::OK() if the spec is valid for a projection.
+     */
+    static Status validate(const BSONObj& spec);
+
+private:
+    ProjectionSpecValidator(const BSONObj& spec) : _rawObj(spec) {}
+
+    /**
+     * Uses '_seenPaths' to see if 'path' conflicts with any paths that have already been specified.
+     *
+     * For example, a user is not allowed to specify {'a': 1, 'a.b': 1}, or some similar conflicting
+     * paths.
+     */
+    Status ensurePathDoesNotConflictOrThrow(StringData path);
+
+    /**
+     * Sets the _status to the correct error if an invalid projection specification is detected.
+     */
+    Status validate();
+
+    /**
+     * Parses a single BSONElement. 'pathToElem' should include the field name of 'elem'.
+     *
+     * Delegates to parseSubObject() if 'elem' is an object. Otherwise adds the full path to 'elem'
+     * to '_seenPaths'.
+     *
+     * Calls ensurePathDoesNotConflictOrThrow with the path to this element, which sets the _status
+     * appropriately for conflicting path specifications.
+     */
+    Status parseElement(const BSONElement& elem, const FieldPath& pathToElem);
+
+    /**
+     * Traverses 'thisLevelSpec', parsing each element in turn.
+     *
+     * Sets _status appropriately if any paths conflict with each other or existing paths,
+     * 'thisLevelSpec' contains a dotted path, or if 'thisLevelSpec' represents an invalid
+     * expression.
+     */
+    Status parseNestedObject(const BSONObj& thisLevelSpec, const FieldPath& prefix);
+
+    // The original object. Used to generate more helpful error messages.
+    const BSONObj& _rawObj;
+
+    // Tracks which paths we've seen to ensure no two paths conflict with each other.
+    // Can be a vector since we iterate through it.
+    std::vector<std::string> _seenPaths;
+};
+
+/**
+ * A ParsedAggregationProjection is responsible for parsing and executing a $project. It
  * represents either an inclusion or exclusion projection. This is the common interface between the
  * two types of projections.
  */

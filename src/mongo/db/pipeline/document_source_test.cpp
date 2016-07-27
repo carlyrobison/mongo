@@ -4620,6 +4620,135 @@ TEST_F(BucketAutoTests, FailsWhenBufferingTooManyDocuments) {
 }
 }  // namespace DocumentSourceBucketAuto
 
+namespace DocumentSourceAddFields {
+
+using mongo::DocumentSourceMock;
+using mongo::DocumentSourceAddFields;
+
+//
+// DocumentSourceAddFields delegates much of its responsibilities to the ParsedAddFields, which
+// derives from parsedAggregationProjection.
+// Most of the functional tests are testing ParsedAddFields directly. These are meant as
+// simpler integration tests.
+//
+
+/**
+ * Class which provides useful helpers to test the functionality of the $addFields stage.
+ */
+class AddFieldsTest : public Mock::Base, public unittest::Test {
+
+public:
+    AddFieldsTest() : _mock(DocumentSourceMock::create()) {}
+
+protected:
+    /**
+     * Creates the $addFields stage, which can be accessed via addFields().
+     */
+    void createAddFields(const BSONObj& fieldsToAdd) {
+        BSONObj spec = BSON("$addFields" << fieldsToAdd);
+        BSONElement specElement = spec.firstElement();
+        _addFields = DocumentSourceAddFields::createFromBson(specElement, ctx());
+        addFields()->setSource(_mock.get());
+    }
+
+    DocumentSource* addFields() {
+        return _addFields.get();
+    }
+
+    DocumentSourceMock* source() {
+        return _mock.get();
+    }
+
+    /**
+     * Assert that iterator state accessors consistently report the source is exhausted.
+     */
+    void assertExhausted() const {
+        ASSERT(!_addFields->getNext());
+        ASSERT(!_addFields->getNext());
+        ASSERT(!_addFields->getNext());
+    }
+
+private:
+    intrusive_ptr<DocumentSource> _addFields;
+    intrusive_ptr<DocumentSourceMock> _mock;
+};
+
+// Verify that the addFields stage keeps existing fields in order when replacing fields, adds new
+// fields at the end, and does not include the _id by default.
+TEST_F(AddFieldsTest, KeepsUnspecifiedFieldsReplacesFieldsAndAddsNewFields) {
+    createAddFields(BSON("e" << 2 << "b" << BSON("c" << 3)));
+    source()->queue.push_back(Document{{"a", 1}, {"b", Document{{"c", 1}}}, {"d", 1}});
+    boost::optional<Document> next = addFields()->getNext();
+    ASSERT_TRUE(bool(next));
+    Document expected = Document{{"a", 1}, {"b", Document{{"c", 3}}}, {"d", 1}, {"e", 2}};
+    ASSERT_DOCUMENT_EQ(*next, expected);
+}
+
+// Verify that the addFields stage optimizes expressions passed as input to added fields.
+TEST_F(AddFieldsTest, OptimizesInnerExpressions) {
+    createAddFields(BSON("a" << BSON("$and" << BSON_ARRAY(BSON("$const" << true)))));
+    addFields()->optimize();
+    // The $and should have been replaced with its only argument.
+    vector<Value> serializedArray;
+    addFields()->serializeToArray(serializedArray);
+    ASSERT_EQUALS(serializedArray[0].getDocument().toBson(),
+                  fromjson("{$addFields: {a: {$const: true}}}"));
+}
+
+// Verify that the addFields stage requires a valid object specification.
+TEST_F(AddFieldsTest, ShouldErrorOnNonObjectSpec) {
+    // Can't use createAddFields() helper because we want to give a non-object spec.
+    BSONObj spec = BSON("$addFields"
+                        << "foo");
+    BSONElement specElement = spec.firstElement();
+    ASSERT_THROWS_CODE(
+        DocumentSourceAddFields::createFromBson(specElement, ctx()), UserException, 40247);
+}
+
+// Verify that mutiple documents can be processed in a row with the addFields stage.
+TEST_F(AddFieldsTest, ProcessesMultipleDocuments) {
+    createAddFields(BSON("a" << 10));
+    source()->queue.push_back(Document{{"a", 1}, {"b", 2}});
+    source()->queue.push_back(Document{{"c", 3}, {"d", 4}});
+
+    boost::optional<Document> next = addFields()->getNext();
+    ASSERT(bool(next));
+    Document expected = Document{{"a", 10}, {"b", 2}};
+    ASSERT_DOCUMENT_EQ(*next, (Document{{"a", 10}, {"b", 2}}));
+
+    next = addFields()->getNext();
+    ASSERT(bool(next));
+    expected = Document{{"c", 3}, {"d", 4}, {"a", 10}};
+    ASSERT_DOCUMENT_EQ(*next, expected);
+
+    assertExhausted();
+}
+
+// Verify that the addFields stage correctly reports its dependencies.
+TEST_F(AddFieldsTest, AddsDependenciesOfIncludedAndComputedFields) {
+    createAddFields(
+        fromjson("{a: true, x: '$b', y: {$and: ['$c','$d']}, z: {$meta: 'textScore'}}"));
+    DepsTracker dependencies(DepsTracker::MetadataAvailable::kTextScore);
+    ASSERT_EQUALS(DocumentSource::SEE_NEXT, addFields()->getDependencies(&dependencies));
+    ASSERT_EQUALS(3U, dependencies.fields.size());
+
+    // No implicit _id dependency.
+    ASSERT_EQUALS(0U, dependencies.fields.count("_id"));
+
+    // Replaced field is not dependent.
+    ASSERT_EQUALS(0U, dependencies.fields.count("a"));
+
+    // Field path expression dependency.
+    ASSERT_EQUALS(1U, dependencies.fields.count("b"));
+
+    // Nested expression dependencies.
+    ASSERT_EQUALS(1U, dependencies.fields.count("c"));
+    ASSERT_EQUALS(1U, dependencies.fields.count("d"));
+    ASSERT_EQUALS(false, dependencies.needWholeDocument);
+    ASSERT_EQUALS(true, dependencies.getNeedTextScore());
+}
+}  // namespace DocumentSourceAddFields
+
 class All : public Suite {
 public:
     All() : Suite("documentsource") {}
