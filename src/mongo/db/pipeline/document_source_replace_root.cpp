@@ -65,7 +65,7 @@ boost::optional<Document> DocumentSourceReplaceRoot::getNext() {
     Value newRoot = _newRoot->evaluate(_variables.get());
 
     // The newRoot expression must evaluate to a valid Value.
-    uassert(40232,
+    uassert(40233,
             str::stream()
                 << " 'newRoot' argument to $replaceRoot stage must evaluate to a valid Value, "
                 << "try ensuring that your field path(s) exist by prepending a "
