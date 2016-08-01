@@ -1588,6 +1588,21 @@ bool Command::run(OperationContext* txn,
 
                         uassert(ErrorCodes::UnsupportedFormat, "_id field required on insert to timeseries.",
                             obj.hasField("_id"));
+                        if (obj.getField("_id").type() != mongo::Date) {
+                          log() << "_ID IS NOT A DATE!!!" << " obj is: " << obj;
+                          if (obj.getField("_id").type() == mongo::NumberLong) {
+                            log() << "_ID is a long";
+                            long long num = obj.getField("_id").Long();
+                            BSONObj newobj = obj.replaceFieldNames(BSON("_id" << Date_t::fromMillisSinceEpoch(num)));
+                            newobj.getOwned();
+                            log() << " obj now: " << newobj;
+                            if (newobj.getField("_id").type() == mongo::Date) {
+                              log() << "_ID IS now a date!!!"; 
+                            }
+                          } else if (obj.getField("_id").type() == mongo::NumberInt) {
+                            log() << "_ID is an int!!!";
+                          }
+                        }
                         uassert(ErrorCodes::UnsupportedFormat, "_id field must contain a Date type for timeseries.",
                             obj.getField("_id").type() == mongo::Date);
 

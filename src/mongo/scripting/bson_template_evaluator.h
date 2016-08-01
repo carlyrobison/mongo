@@ -263,6 +263,11 @@ private:
                                   const BSONObj& in,
                                   BSONObjBuilder& out);
 
+    static Status evalSeqDate(BsonTemplateEvaluator* btl,
+                             const char* fieldName,
+                             const BSONObj& in,
+                             BSONObjBuilder& out);
+
     // Per object pseudo random number generator
     PseudoRandom rng;
 };

@@ -26,7 +26,10 @@
  *    then also delete it in the license file.
  */
 
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kDefault
+
 #include "mongo/scripting/bson_template_evaluator.h"
+#include "mongo/util/log.h"
 
 #include <cstddef>
 #include <cstdlib>
@@ -47,6 +50,7 @@ void BsonTemplateEvaluator::initializeEvaluator() {
     addOperator("OID", &BsonTemplateEvaluator::evalObjId);
     addOperator("VARIABLE", &BsonTemplateEvaluator::evalVariable);
     addOperator("CUR_DATE", &BsonTemplateEvaluator::evalCurrentDate);
+    addOperator("SEQ_DATE", &BsonTemplateEvaluator::evalSeqDate);
 }
 
 BsonTemplateEvaluator::BsonTemplateEvaluator(int64_t seed) : _id(0), rng(seed) {
@@ -337,6 +341,50 @@ BsonTemplateEvaluator::Status BsonTemplateEvaluator::evalCurrentDate(BsonTemplat
     // in = { #CUR_DATE: 1 }
     auto offset = Milliseconds(in.firstElement().numberLong());
     out.append(fieldName, Date_t::now() + offset);
+    return StatusSuccess;
+}
+
+BsonTemplateEvaluator::Status BsonTemplateEvaluator::evalSeqDate(BsonTemplateEvaluator* btl,
+                                                                const char* fieldName,
+                                                                const BSONObj& in,
+                                                                BSONObjBuilder& out) {
+    // in = { #SEQ_DATE: { seq_id: 0, start: 10, step: -2 }
+    BSONObj spec = in.firstElement().embeddedObject();
+    if (spec.nFields() < 3)
+        return StatusOpEvaluationError;
+    if (spec["seq_id"].eoo() || !spec["seq_id"].isNumber())
+        return StatusOpEvaluationError;
+    if (spec["start"].eoo() || !spec["start"].isNumber())
+        return StatusOpEvaluationError;
+    if (spec["step"].eoo() || !spec["step"].isNumber())
+        return StatusOpEvaluationError;
+
+    // If we're here, then we have a well-formed SEQ_INT specification:
+    // seq_id, start, and step fields, which are all numbers.
+
+    int seq_id = spec["seq_id"].numberInt();
+    long long curr_seqval = spec["start"].numberInt();
+
+    // Handle the optional "unique" argument.
+    //
+    // If the test requires us to keep sequences unique between different
+    // worker threads, then put the id number of this evaluator in the
+    // high order byte.
+    if (!spec["unique"].eoo() && spec["unique"].trueValue()) {
+        long long workerid = btl->_id;
+        curr_seqval += (workerid << ((sizeof(long long) - 1) * 8));
+    }
+
+    if (btl->_seqIdMap.end() != btl->_seqIdMap.find(seq_id)) {
+        // We already have a sequence value. Add 'step' to get the next value.
+        int step = spec["step"].numberInt();
+        curr_seqval = btl->_seqIdMap[seq_id] + step;
+    }
+
+    // Store the sequence value.
+    btl->_seqIdMap[seq_id] = curr_seqval;
+
+    out.append(fieldName, Date_t::fromMillisSinceEpoch(curr_seqval));
     return StatusSuccess;
 }
 
