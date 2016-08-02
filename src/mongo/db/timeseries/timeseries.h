@@ -141,7 +141,7 @@ public:
     /**
      * Inserts a document into the time series DB.
      */
-    void insert(const BSONObj& doc, const Date_t& date);
+    void insert(const BSONObj& doc);
 
     /* Retrieves the single BSONObj for the batch document. */
     BSONObj retrieveBatch();
@@ -176,36 +176,10 @@ public:
     void insert(OperationContext* txn, const BSONObj& doc, bool persistent = false);
 
     /* Loads a batch into the cache and the cache list */
-    BSONObj findBatch(OperationContext* txn, batchIdType batchId);
-
-    /* Updates a document in the corresponding batch.
-     * Checks for space? Updates LRU list */
-    void update(const BSONObj& doc);
-
-    /* Gets the document corresponding to that date and time.
-     * Updates LRU list */
-    BSONObj retrieve(const Date_t& time);
+    // BSONObj findBatch(OperationContext* txn, batchIdType batchId);
 
     /* Updates LRU list */
     BSONObj retrieveBatch(const Date_t& time);
-
-    /* Removes the document at that time.
-     * Decrements the space? */
-    void remove(const Date_t& time);
-
-    /* Removes a specific batch from the collection. Deletes it from the cache,
-     * and the cache list, decrements cache size. */
-    void removeBatch(const Date_t& time);
-
-    /**
-     * Saves all of the batches at once to the backing collection. Saving consists of:
-     * Saving to the collection
-     * Waiting until durable????
-     */
-    bool saveToCollection();
-
-    // When trying to get rid of TS Cache, save everything to the collection
-    // ~TimeSeriesCache();
 
 private:
     /* Cache methods that should not be able to be called by external classes */
@@ -229,7 +203,7 @@ private:
     void dropFromCache(batchIdType batchId);
 
     /* Adds to the cache, updates the LRU list, determines if eviction needed... */
-    void addToCache(OperationContext* txn, TimeSeriesBatch& batch);
+    void addToCache(OperationContext* txn, TimeSeriesCompressor& batch);
 
     /* Queue for LRU part of cache: least recently used is at the front, we add
      * new elements to the back */
@@ -241,7 +215,7 @@ private:
 
     /* Map of batch IDs to TSbatches */
     /* cache should own the batch so use emplace */
-    std::map<batchIdType, TimeSeriesBatch> _cache;
+    std::map<batchIdType, TimeSeriesCompressor> _cache;
 
     // Namespace of underlying collection
     NamespaceString _nss;

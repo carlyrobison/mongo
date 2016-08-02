@@ -242,8 +242,10 @@ namespace mongo {
 // }
 
 TEST(TimeSeries, Cache) {
+    log() << "hello there";
     OperationContextNoop txn;
-    TimeSeriesCache cache;
+    NamespaceString nss("timeseriewview", "tsv");
+    TimeSeriesCache cache(nss);
 
     // Insert some documents
     for (int i = 0; i < 5000; i += 100) {

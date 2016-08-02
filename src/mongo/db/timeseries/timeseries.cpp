@@ -104,7 +104,7 @@ void TimeSeriesBatch::update(const BSONObj& doc) {
 }
 
 BSONObj TimeSeriesBatch::retrieveBatch() {
-    //log() << "Retrieving object of batch: " << toString();
+    log() << "Retrieving object of batch: " << toString();
 
     // create the BSON array
     BSONArrayBuilder arrayBuilder;
@@ -199,12 +199,14 @@ std::string TimeSeriesCompressor::toString(bool includeTime) const {
     return s.str();
 }
 
-void TimeSeriesCompressor::insert(const BSONObj& doc, const Date_t& date) {
+void TimeSeriesCompressor::insert(const BSONObj& doc) {
     BSONObj newDoc = doc.getOwned();  // internally copies if necessary
+    Date_t date = newDoc.getField("_id").Date();
 
     /* Adds this document to the map of documents, based on date. */
     auto st = _compressor->addSample(doc, date);
-    massert(40195, "Insert was not OK", st.isOK());
+    uassert(40195, "Insert was not OK", st.isOK());
+    // uassertStatusOK
     if (std::get<1>(st.getValue().get()) == FTDCCompressor::CompressorState::kCompressorFull) {
         log() << "WE NEED TO SAVE!!!";
     }
@@ -212,16 +214,16 @@ void TimeSeriesCompressor::insert(const BSONObj& doc, const Date_t& date) {
 
 BSONObj TimeSeriesCompressor::retrieveBatch() {
     // build BSON object iteself
+    log() << "retrieving batch: " << toString();
     BSONObjBuilder builder;
     builder.append("_id", _batchId);
+    log() << "Id appended";
     StatusWith<std::tuple<ConstDataRange, Date_t>> swBuf = _compressor->getCompressedSamples();
-    massert(40196, "Retrieval was not OK", swBuf.isOK());
+    log() << "got compressed samples? " << swBuf.isOK();
+    uassert(40196, "Retrieval was not OK", swBuf.isOK());
     ConstDataRange dataRange = std::get<0>(swBuf.getValue());
-    auto bsonst = dataRange.read<BSONElement>();
-    massert(40197, "Read was not OK", bsonst.isOK());
-    BSONElement bsondata = bsonst.getValue();
-    log() << "compressed data: " << bsondata;
-    builder.append("_docs", bsondata);
+    //log() << "got const data range shouldn't be null " << (dataRange.data() != nullptr);
+    builder.appendBinData("_docs", dataRange.length(), BinDataType::BinDataGeneral, dataRange.data());
     log() << builder.asTempObj();
     return builder.obj();
 }
@@ -271,32 +273,35 @@ std::string TimeSeriesCache::toString(bool printBatches) const {
 }
 
 void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, bool persistent) {
+    log() << "Inserting into cache";
 	Date_t date = doc.getField("_id").Date();
-
     batchIdType batchId = _getBatchId(date);
 
     // Check if the batch exists in the cache. If it doesn't, try to find it. If it does, use the existing one.
     if (_cache.find(batchId) == _cache.end()) {
-        //log() << "Batch not in the cache";
+        log() << "Batch not in the cache";
         // Batch does not exist in the cache. Try to load it from the underlying collection.
-        auto loadedBatch = findBatch(txn, batchId);
+        // auto loadedBatch = findBatch(txn, batchId);
 
-        //log() << "Loaded the batch: " << loadedBatch;
+        // //log() << "Loaded the batch: " << loadedBatch;
 
-        if (!loadedBatch.isEmpty()) {
-            //log() << "Nonempty batch";
-            //TimeSeriesBatch newBatch(loadedBatch.getOwned());
-            TimeSeriesBatch newBatch(loadedBatch);
-            addToCache(txn, newBatch);
-            massert(40194, "Loaded batch must be what we got from collection", newBatch.retrieveBatch() == loadedBatch);
-        } else {
+        // if (!loadedBatch.isEmpty()) {
+        //     //log() << "Nonempty batch";
+        //     //TimeSeriesBatch newBatch(loadedBatch.getOwned());
+        //     //TimeSeriesBatch newBatch(loadedBatch);
+
+        //     addToCache(txn, newBatch);
+        //     massert(40194, "Loaded batch must be what we got from collection", newBatch.retrieveBatch() == loadedBatch);
+        // } else {
             //log() << "Batch not in collection, making a new one";
             // Sparkling new time batch
-            TimeSeriesBatch newBatch(batchId);
-            addToCache(txn, newBatch);
-        }
+        TimeSeriesCompressor newBatch(batchId);
+        log() << "New batch created";
+        addToCache(txn, newBatch);
+        log() << "Done adding to cache";
+        // }
     } else { // Simply add it to the LRU cache
-        //log() << "Batch already in cache";
+        log() << "Batch already in cache";
         addToLRUList(batchId);
     }
 
@@ -310,58 +315,26 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, bool per
 
 }
 
-BSONObj TimeSeriesCache::findBatch(OperationContext* txn, batchIdType batchId) {
-    // Check that the batch id doesn't already exist in memory.
-    massert(40189, "Cannot find a batch that already exists in the cache.",
-        _cache.find(batchId) == _cache.end());
+// BSONObj TimeSeriesCache::findBatch(OperationContext* txn, batchIdType batchId) {
+//     // Check that the batch id doesn't already exist in memory.
+//     massert(40189, "Cannot find a batch that already exists in the cache.",
+//         _cache.find(batchId) == _cache.end());
 
-    //log() << "Finding batch. <Mario voice> Here we go!";
-    BSONObjBuilder query;
-    query.append("_id", batchId);
-    AutoGetCollectionForRead autoColl(txn, _nss);
+//     //log() << "Finding batch. <Mario voice> Here we go!";
+//     BSONObjBuilder query;
+//     query.append("_id", batchId);
+//     AutoGetCollectionForRead autoColl(txn, _nss);
 
-     // check getCollection syntax
-    BSONObj result;
-    // what does "set your db SavedContext first" mean?
-    Helpers::findOne(txn, autoColl.getCollection(), query.obj().getOwned(), result, true);
-    //bool success = Helpers::findOne(txn, autoColl.getCollection(), query.obj().getOwned(), result, true);
+//      // check getCollection syntax
+//     BSONObj result;
+//     // what does "set your db SavedContext first" mean?
+//     Helpers::findOne(txn, autoColl.getCollection(), query.obj().getOwned(), result, true);
+//     //bool success = Helpers::findOne(txn, autoColl.getCollection(), query.obj().getOwned(), result, true);
 
-    //log() << "Find success? " << success << ", with result " << result;
-    // addToCache(TimeSeriesBatch(doc));
-    return result;
-}
-
-void TimeSeriesCache::update(const BSONObj& doc) {
-	Date_t date = doc.getField("_id").Date();
-
-    log() << "Update unsupported.";
-
-	batchIdType batchId = _getBatchId(date);
-
-	// Assert that the batch exists.
-	uassert(BATCH_NONEXISTENT, "Cannot update a document in a batch that does not exist",
-		_cache.find(batchId) != _cache.end());
-    
-    TimeSeriesBatch& batch = _cache[batchId];
-
-    batch.update(doc);
-}
-
-BSONObj TimeSeriesCache::retrieve(const Date_t& time) {
-    batchIdType batchId = _getBatchId(time);
-
-    log() << "Why are you retrieving from the cache? Use the find() path!";
-
-	// Assert that the batch exists.
-    uassert(BATCH_NONEXISTENT, "Cannot retrieve from a batch that doesn't exist.",
-    	_cache.find(batchId) != _cache.end());
-
-    TimeSeriesBatch& batch = _cache[batchId];
-
-    addToLRUList(batchId);
-
-    return batch.retrieve(time);
-}
+//     //log() << "Find success? " << success << ", with result " << result;
+//     // addToCache(TimeSeriesBatch(doc));
+//     return result;
+// }
 
 BSONObj TimeSeriesCache::retrieveBatch(const Date_t& time) {
     batchIdType batchId = _getBatchId(time);
@@ -370,44 +343,11 @@ BSONObj TimeSeriesCache::retrieveBatch(const Date_t& time) {
     uassert(BATCH_NONEXISTENT, "Cannot retrieve a batch that doesn't exist.",
     	_cache.find(batchId) != _cache.end());
 
-    TimeSeriesBatch& batch = _cache[batchId];
+    TimeSeriesCompressor& batch = _cache[batchId];
 
     addToLRUList(batchId);
 
     return batch.retrieveBatch();
-}
-
-void TimeSeriesCache::remove(const Date_t& time) {
-    batchIdType batchId = _getBatchId(time);
-
-	// Assert that the batch exists.
-    uassert(BATCH_NONEXISTENT, "Cannot delete from a batch that doesn't exist.",
-    	_cache.find(batchId) != _cache.end());
-
-    TimeSeriesBatch& batch = _cache[batchId];
-
-    batch.remove(time);
-
-    addToLRUList(batchId);
-}
-
-void TimeSeriesCache::removeBatch(const Date_t& time) {
-	batchIdType batchId = _getBatchId(time);
-
-	// Assert that the batch exists.
-    uassert(BATCH_NONEXISTENT, "Cannot delete a batch that doesn't exist.",
-    	_cache.find(batchId) != _cache.end());
-
-    // TODO: gracefully close the batch, i.e. freeing memory we used?
-
-    /* Remove from the collection */
-
-    /* Remove from cache */
-    dropFromCache(batchId);
-}
-
-bool TimeSeriesCache::saveToCollection(){
-    return true;
 }
 
 batchIdType TimeSeriesCache::evictBatch(OperationContext* txn) {
@@ -459,7 +399,7 @@ void TimeSeriesCache::dropFromCache(batchIdType batchId) {
 }
 
 /* Adds to the cache, updates the LRU list, determines if eviction needed... */
-void TimeSeriesCache::addToCache(OperationContext* txn, TimeSeriesBatch& batch) {
+void TimeSeriesCache::addToCache(OperationContext* txn, TimeSeriesCompressor& batch) {
     batchIdType batchId = batch._thisBatchId();
 
     massert(40192, "Batch is already in the cache", _cache.find(batchId) == _cache.end());

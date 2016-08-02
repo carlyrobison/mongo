@@ -1,7 +1,6 @@
 // Insert many documents into a 
 
-load("utils.js");
-
+load("src/mongo/db/timeseries/utils.js");
 
 (function() {
 
