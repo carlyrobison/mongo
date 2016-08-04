@@ -55,9 +55,10 @@ public:
 
     /**
      * Creates the data needed to perform an AddFields.
+     * Verifies that there are no conflicting paths in the specification.
      * Overrides the create() method in ParsedAggregationProjection.
      */
-    static std::unique_ptr<ParsedAddFields> create(const BSONObj& spec);
+    static std::unique_ptr<ParsedAddFields> create(const BSONObj& spec) override;
 
     ProjectionType getType() const final {
         return ProjectionType::kComputed;
@@ -105,7 +106,9 @@ public:
      * $addFields stage.
      *
      * Arrays will be traversed, with any dotted/nested computed fields applied to each element in
-     * the array. (SERVER-25200 change this behavior to be the same as $set in Update.)
+     * the array. For example, setting "a.0": "hello" will add a field "0": "hello" to every object
+     * in the array "a". If there is an element in "a" that is not an object, it will be replaced
+     * with {"0": "hello"}. See SERVER-25200 for more details.
      */
     Document applyProjection(Document inputDoc) const final {
         _variables->setRoot(inputDoc);

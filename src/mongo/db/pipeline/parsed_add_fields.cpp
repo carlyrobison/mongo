@@ -115,8 +115,8 @@ void ParsedAddFields::parseSubObject(const BSONObj& subObj,
                                      InclusionNode* node) {
     for (auto elem : subObj) {
         invariant(elem.fieldName()[0] != '$');
-        // Dotted paths in a sub-object have already been disallowed in
-        // ParsedAggregationProjection's parsing.
+        // Dotted paths in a sub-object have already been detected and disallowed by the function
+        // ProjectionSpecValidator::validate().
         invariant(elem.fieldNameStringData().find('.') == std::string::npos);
 
         if (elem.type() == BSONType::Object) {

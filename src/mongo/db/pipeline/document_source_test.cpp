@@ -4627,7 +4627,7 @@ using mongo::DocumentSourceAddFields;
 
 //
 // DocumentSourceAddFields delegates much of its responsibilities to the ParsedAddFields, which
-// derives from parsedAggregationProjection.
+// derives from ParsedAggregationProjection.
 // Most of the functional tests are testing ParsedAddFields directly. These are meant as
 // simpler integration tests.
 //
@@ -4673,8 +4673,8 @@ private:
     intrusive_ptr<DocumentSourceMock> _mock;
 };
 
-// Verify that the addFields stage keeps existing fields in order when replacing fields, adds new
-// fields at the end, and does not include the _id by default.
+// Verify that the addFields stage keeps existing fields in order when replacing fields, and adds
+// new fields at the end of the document.
 TEST_F(AddFieldsTest, KeepsUnspecifiedFieldsReplacesFieldsAndAddsNewFields) {
     createAddFields(BSON("e" << 2 << "b" << BSON("c" << 3)));
     source()->queue.push_back(Document{{"a", 1}, {"b", Document{{"c", 1}}}, {"d", 1}});

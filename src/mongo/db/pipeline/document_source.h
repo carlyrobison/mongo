@@ -439,6 +439,27 @@ protected:
     std::shared_ptr<MongodInterface> _mongod;
 };
 
+// /** TODOOOOOOO
+//  * This class marks DocumentSources that takes in one document and return one document at a time, in
+//  * a 1:1 transformation.
+//  */
+// class SingleDocumentTransformationDocumentSource {
+// public:
+//     /** returns a source to be run on the shards.
+//      *  if NULL, don't run on shards
+//      */
+//     virtual boost::intrusive_ptr<DocumentSource> getShardSource() = 0;
+
+//     /** returns a source that combines results from shards.
+//      *  if NULL, don't run on merger
+//      */
+//     virtual boost::intrusive_ptr<DocumentSource> getMergeSource() = 0;
+
+// protected:
+//     // It is invalid to delete through a SplittableDocumentSource-typed pointer.
+//     virtual ~SplittableDocumentSource() {}
+// };
+
 /**
  * Constructs and returns Documents from the BSONObj objects produced by a supplied
  * PlanExecutor.
@@ -2037,7 +2058,8 @@ public:
     void dispose() final;
 
     /**
-     * Adds any paths that are included via this stage, or that are referenced by any expressions.
+     * Adds any paths that are added/replaced via this stage, or that are referenced by any
+     * expressions.
      */
     GetDepsReturn getDependencies(DepsTracker* deps) const final;
 

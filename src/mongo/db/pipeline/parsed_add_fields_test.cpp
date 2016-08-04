@@ -52,12 +52,12 @@ using std::vector;
 
 // Verify that ParsedAddFields rejects specifications with conflicting field paths.
 TEST(ParsedAddFieldsSpec, ThrowsOnCreationWithConflictingFieldPaths) {
-    // Same exact path
+    // These specs contain the same exact path.
     ASSERT_THROWS(ParsedAddFields::create(BSON("a" << 1 << "a" << 2)), UserException);
     ASSERT_THROWS(ParsedAddFields::create(BSON("a" << BSON("b" << 1 << "b" << 2))), UserException);
     ASSERT_THROWS(ParsedAddFields::create(BSON("_id" << 3 << "_id" << true)), UserException);
 
-    // Overlapping paths
+    // These specs contain overlapping paths.
     ASSERT_THROWS(ParsedAddFields::create(BSON("a" << 1 << "a.b" << 2)), UserException);
     ASSERT_THROWS(ParsedAddFields::create(BSON("a.b.c" << 1 << "a" << 2)), UserException);
     ASSERT_THROWS(ParsedAddFields::create(BSON("_id" << true << "_id.x" << true)), UserException);
@@ -68,11 +68,11 @@ TEST(ParsedAddFieldsSpec, ThrowsOnCreationWithInvalidFieldPath) {
     // Dotted subfields are not allowed.
     ASSERT_THROWS(ParsedAddFields::create(BSON("a" << BSON("b.c" << true))), UserException);
 
-    // Cannot start a field with $
+    // The user cannot start a field with $.
     ASSERT_THROWS(ParsedAddFields::create(BSON("$dollar" << 0)), UserException);
     ASSERT_THROWS(ParsedAddFields::create(BSON("c.$d" << true)), UserException);
 
-    // Empty field names
+    // Empty field names should throw an error.
     ASSERT_THROWS(ParsedAddFields::create(BSON("" << 2)), UserException);
     ASSERT_THROWS(ParsedAddFields::create(BSON("a" << BSON("" << true))), UserException);
     ASSERT_THROWS(ParsedAddFields::create(BSON("" << BSON("a" << true))), UserException);
@@ -83,7 +83,7 @@ TEST(ParsedAddFieldsSpec, ThrowsOnCreationWithInvalidFieldPath) {
 // Verify that ParsedAddFields rejects specifications that contain empty objects or invalid
 // expressions.
 TEST(ParsedAddFieldsSpec, ThrowsOnCreationWithInvalidObjectsOrExpressions) {
-    // Invalid expression
+    // Invalid expressions should be rejected.
     ASSERT_THROWS(
         ParsedAddFields::create(BSON("a" << BSON("$add" << BSON_ARRAY(4 << 2) << "b" << 1))),
         UserException);
@@ -94,10 +94,10 @@ TEST(ParsedAddFieldsSpec, ThrowsOnCreationWithInvalidObjectsOrExpressions) {
                       BSON("a" << false << "b" << BSON("$unknown" << BSON_ARRAY(4 << 2)))),
                   UserException);
 
-    // Empty specification
+    // Empty specifications are not allowed.
     ASSERT_THROWS(ParsedAddFields::create(BSONObj()), UserException);
 
-    // Empty nested object
+    // Empty nested objects are not allowed.
     ASSERT_THROWS(ParsedAddFields::create(BSON("a" << BSONObj())), UserException);
 }
 
@@ -377,7 +377,7 @@ TEST(ParsedAddFieldsExecutionTest, CreatesSubDocIfDottedAddedFieldDoesNotExist) 
 }
 
 // Verify that adding a dotted value to an array field sets the field in every element of the array.
-// SERVER-25200: make this agree with $set
+// SERVER-25200: make this agree with $set.
 TEST(ParsedAddFieldsExecutionTest, AppliesDottedAdditionToEachElementInArray) {
     ParsedAddFields addition;
     addition.parse(BSON("a.b" << true));
@@ -460,7 +460,7 @@ TEST(ParsedAddFieldsExecutionTest, ShouldAllowMixedNestedAndDottedFields) {
     ASSERT_DOCUMENT_EQ(result, expectedResult);
 }
 
-// Verify that adding nested fields preserves the addition order in the spec
+// Verify that adding nested fields preserves the addition order in the spec.
 TEST(ParsedAddFieldsExecutionTest, AddsNestedAddedFieldsInOrderSpecified) {
     ParsedAddFields addition;
     addition.parse(BSON("b.d"
