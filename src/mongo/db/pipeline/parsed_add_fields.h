@@ -56,7 +56,6 @@ public:
     /**
      * Creates the data needed to perform an AddFields.
      * Verifies that there are no conflicting paths in the specification.
-     * Overrides the create() method in ParsedAggregationProjection.
      */
     static std::unique_ptr<ParsedAddFields> create(const BSONObj& spec) override;
 
