@@ -1376,7 +1376,7 @@ protected:
     void createProject(const BSONObj& projection) {
         BSONObj spec = BSON("$project" << projection);
         BSONElement specElement = spec.firstElement();
-        _project = DocumentSourceProject::createFromBson(specElement, ctx());
+        _project = DocumentSourceProject::createFromBson(specElement, ctx())[0];
     }
 
     DocumentSource* project() {
@@ -4647,7 +4647,7 @@ protected:
     void createAddFields(const BSONObj& fieldsToAdd) {
         BSONObj spec = BSON("$addFields" << fieldsToAdd);
         BSONElement specElement = spec.firstElement();
-        _addFields = DocumentSourceAddFields::createFromBson(specElement, ctx());
+        _addFields = DocumentSourceAddFields::createFromBson(specElement, ctx())[0];
         addFields()->setSource(_mock.get());
     }
 

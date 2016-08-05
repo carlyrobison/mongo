@@ -35,6 +35,7 @@
 
 #include "mongo/bson/bsonelement.h"
 #include "mongo/db/pipeline/field_path.h"
+#include "mongo/db/pipeline/document_source.h"
 
 namespace mongo {
 
@@ -110,7 +111,7 @@ private:
  * represents either an inclusion or exclusion projection. This is the common interface between the
  * two types of projections.
  */
-class ParsedAggregationProjection {
+class ParsedAggregationProjection : public ParsedSingleDocumentTransformation {
 public:
     /**
      * Main entry point for a ParsedAggregationProjection.
@@ -155,12 +156,20 @@ public:
     virtual void addDependencies(DepsTracker* deps) const {}
 
     /**
-     * Apply the projection to 'input'.
+     * Needed to be a ParsedSingleDocumentTransformation.
+     * Rename of a function that does the same thing.
      */
-    virtual Document applyProjection(Document input) const = 0;
+    Document applyTransformation(Document input) {
+        return applyProjection(input);
+    }
 
 protected:
     ParsedAggregationProjection() = default;
+
+    /**
+     * Apply the projection to 'input'.
+     */
+    virtual Document applyProjection(Document input) const = 0;
 };
 }  // namespace parsed_aggregation_projection
 }  // namespace mongo

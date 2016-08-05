@@ -439,27 +439,6 @@ protected:
     std::shared_ptr<MongodInterface> _mongod;
 };
 
-// /** TODOOOOOOO
-//  * This class marks DocumentSources that takes in one document and return one document at a time, in
-//  * a 1:1 transformation.
-//  */
-// class SingleDocumentTransformationDocumentSource {
-// public:
-//     /** returns a source to be run on the shards.
-//      *  if NULL, don't run on shards
-//      */
-//     virtual boost::intrusive_ptr<DocumentSource> getShardSource() = 0;
-
-//     /** returns a source that combines results from shards.
-//      *  if NULL, don't run on merger
-//      */
-//     virtual boost::intrusive_ptr<DocumentSource> getMergeSource() = 0;
-
-// protected:
-//     // It is invalid to delete through a SplittableDocumentSource-typed pointer.
-//     virtual ~SplittableDocumentSource() {}
-// };
-
 /**
  * Constructs and returns Documents from the BSONObj objects produced by a supplied
  * PlanExecutor.
@@ -999,6 +978,54 @@ public:
     BSONObjSet sorts;
 };
 
+/**
+ * This class ensures that DocumentSourceSingleDocumentTransformations are passed parsed objects
+ * that can execute the transformation and provide additional features like serialize and optimize.
+ */
+class ParsedSingleDocumentTransformation {
+public:
+    virtual void optimize();
+
+    virtual Document applyTransformation(Document input);
+
+    virtual Document serialize(bool explain);
+
+    virtual void addDependencies(DepsTracker* deps);
+
+    virtual void injectExpressionContext(const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+};
+
+/** 
+ * This class marks DocumentSources that takes in one document and return one document at a time, in
+ * a 1:1 transformation.
+ * It should only be used via an alias that passes the transformation logic through a
+ * ParsedSingleDocumentTransformation.
+ */
+class DocumentSourceSingleDocumentTransformation final : public DocumentSource {
+public:
+    DocumentSourceSingleDocumentTransformation(
+        const boost::intrusive_ptr<ExpressionContext>& pExpCtx,
+        std::unique_ptr<ParsedSingleDocumentTransformation> parsedTransform,
+        const char* name,
+        const GetDepsReturn depsReturnType);
+
+    const char* getSourceName() const;
+    boost::optional<Document> getNext();
+    boost::intrusive_ptr<DocumentSource> optimize();
+    void dispose();
+    Value serialize(bool explain) const;
+    Pipeline::SourceContainer::iterator optimizeAt(Pipeline::SourceContainer::iterator itr, Pipeline::SourceContainer* container);
+    void doInjectExpressionContext();
+    DocumentSource::GetDepsReturn getDependencies(DepsTracker* deps) const;
+
+private:
+    std::unique_ptr<ParsedSingleDocumentTransformation> _parsedTransform;
+
+    const char* _name;
+
+    const GetDepsReturn _depsReturnType;
+};
+
 class DocumentSourceOut final : public DocumentSourceNeedsMongod, public SplittableDocumentSource {
 public:
     // virtuals from DocumentSource
@@ -1055,48 +1082,6 @@ private:
 
     NamespaceString _tempNs;          // output goes here as it is being processed.
     const NamespaceString _outputNs;  // output will go here after all data is processed.
-};
-
-
-class DocumentSourceProject final : public DocumentSource {
-public:
-    boost::optional<Document> getNext() final;
-    const char* getSourceName() const final;
-    Value serialize(bool explain = false) const final;
-    void dispose() final;
-
-    /**
-     * Adds any paths that are included via this projection, or that are referenced by any
-     * expressions.
-     */
-    GetDepsReturn getDependencies(DepsTracker* deps) const final;
-
-    /**
-     * Attempt to move a subsequent $skip or $limit stage before the $project, thus reducing the
-     * number of documents that pass through this stage.
-     */
-    Pipeline::SourceContainer::iterator optimizeAt(Pipeline::SourceContainer::iterator itr,
-                                                   Pipeline::SourceContainer* container) final;
-
-    /**
-     * Optimize any expressions being used in this stage.
-     */
-    boost::intrusive_ptr<DocumentSource> optimize() final;
-
-    void doInjectExpressionContext() final;
-
-    /**
-     * Parse the projection from the user-supplied BSON.
-     */
-    static boost::intrusive_ptr<DocumentSource> createFromBson(
-        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
-
-private:
-    DocumentSourceProject(
-        const boost::intrusive_ptr<ExpressionContext>& expCtx,
-        std::unique_ptr<parsed_aggregation_projection::ParsedAggregationProjection> parsedProject);
-
-    std::unique_ptr<parsed_aggregation_projection::ParsedAggregationProjection> _parsedProject;
 };
 
 class DocumentSourceRedact final : public DocumentSource {
@@ -1922,6 +1907,28 @@ private:
     DocumentSourceBucket() = default;
 };
 
+class DocumentSourceProject final {
+public:
+    static std::vector<boost::intrusive_ptr<DocumentSource>> createFromBson(
+        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+
+private:
+    DocumentSourceProject() = default;
+};
+
+/**
+ * $addFields adds or replaces the specified fields to/in the document while preserving the original
+ * document. Is modeled on and throws the same errors as $project.
+ */
+class DocumentSourceAddFields final {
+public:
+    static std::vector<boost::intrusive_ptr<DocumentSource>> createFromBson(
+        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+
+private:
+    DocumentSourceAddFields() = default;
+};
+
 /**
  * Provides a document source interface to retrieve collection-level statistics for a given
  * collection.
@@ -2044,51 +2051,4 @@ private:
     long long _nDocuments = 0;
 };
 
-/**
- * $addFields adds or replaces the specified fields to/in the document while preserving the original
- * document. Is modeled on and throws the same errors as $project.
- */
-class DocumentSourceAddFields final : public DocumentSource {
-public:
-    // virtuals from DocumentSource.
-    boost::optional<Document> getNext() final;
-    const char* getSourceName() const final;
-    boost::intrusive_ptr<DocumentSource> optimize() final;
-    Value serialize(bool explain = false) const final;
-    void dispose() final;
-
-    /**
-     * Adds any paths that are added/replaced via this stage, or that are referenced by any
-     * expressions.
-     */
-    GetDepsReturn getDependencies(DepsTracker* deps) const final;
-
-    /**
-     * Attempt to move a subsequent $skip or $limit stage before the addFields, thus reducing the
-     * number of documents that pass through this stage.
-     */
-    Pipeline::SourceContainer::iterator optimizeAt(Pipeline::SourceContainer::iterator itr,
-                                                   Pipeline::SourceContainer* container) final;
-
-    /**
-     * Adds the expression context to each of the expressions so that they can evaluate from the
-     * input document.
-     */
-    void doInjectExpressionContext() final;
-
-    /**
-     * Parse the $addFields from the user-supplied BSON.
-     */
-    static boost::intrusive_ptr<DocumentSource> createFromBson(
-        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
-
-private:
-    DocumentSourceAddFields(
-        const boost::intrusive_ptr<ExpressionContext>& expCtx,
-        std::unique_ptr<parsed_aggregation_projection::ParsedAddFields> parsedAddFields);
-
-    // ParsedAddFields derives from ParsedAggregationProjection but does not remove all original
-    // fields before adding new ones.
-    std::unique_ptr<parsed_aggregation_projection::ParsedAddFields> _parsedAddFields;
-};
 }  // namespace mongo

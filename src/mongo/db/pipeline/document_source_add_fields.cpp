@@ -30,70 +30,19 @@
 
 #include "mongo/db/pipeline/document_source.h"
 
+#include <boost/optional.hpp>
 #include <boost/smart_ptr/intrusive_ptr.hpp>
 
-#include "mongo/db/pipeline/document.h"
-#include "mongo/db/pipeline/expression.h"
 #include "mongo/db/pipeline/parsed_add_fields.h"
-#include "mongo/db/pipeline/parsed_inclusion_projection.h"
-#include "mongo/db/pipeline/value.h"
 
 namespace mongo {
 
 using boost::intrusive_ptr;
 using parsed_aggregation_projection::ParsedAddFields;
 
-DocumentSourceAddFields::DocumentSourceAddFields(const intrusive_ptr<ExpressionContext>& expCtx,
-                                                 std::unique_ptr<ParsedAddFields> parsedAddFields)
-    : DocumentSource(expCtx), _parsedAddFields(std::move(parsedAddFields)) {}
+REGISTER_DOCUMENT_SOURCE_ALIAS(addFields, DocumentSourceAddFields::createFromBson);
 
-REGISTER_DOCUMENT_SOURCE(addFields, DocumentSourceAddFields::createFromBson);
-
-const char* DocumentSourceAddFields::getSourceName() const {
-    return "$addFields";
-}
-
-boost::optional<Document> DocumentSourceAddFields::getNext() {
-    pExpCtx->checkForInterrupt();
-
-    // Get the next input document.
-    boost::optional<Document> input = pSource->getNext();
-    if (!input) {
-        return boost::none;
-    }
-
-    // Apply and return the document with added fields.
-    return _parsedAddFields->applyProjection(*input);
-}
-
-Pipeline::SourceContainer::iterator DocumentSourceAddFields::optimizeAt(
-    Pipeline::SourceContainer::iterator itr, Pipeline::SourceContainer* container) {
-    invariant(*itr == this);
-
-    auto nextSkip = dynamic_cast<DocumentSourceSkip*>((*std::next(itr)).get());
-    auto nextLimit = dynamic_cast<DocumentSourceLimit*>((*std::next(itr)).get());
-
-    if (nextSkip || nextLimit) {
-        std::swap(*itr, *std::next(itr));
-        return itr == container->begin() ? itr : std::prev(itr);
-    }
-    return std::next(itr);
-}
-
-intrusive_ptr<DocumentSource> DocumentSourceAddFields::optimize() {
-    _parsedAddFields->optimize();
-    return this;
-}
-
-void DocumentSourceAddFields::dispose() {
-    _parsedAddFields.reset();
-}
-
-Value DocumentSourceAddFields::serialize(bool explain) const {
-    return Value(Document{{getSourceName(), _parsedAddFields->serialize(explain)}});
-}
-
-intrusive_ptr<DocumentSource> DocumentSourceAddFields::createFromBson(
+std::vector<intrusive_ptr<DocumentSource>> DocumentSourceAddFields::createFromBson(
     BSONElement elem, const intrusive_ptr<ExpressionContext>& expCtx) {
 
     // Confirm that the stage was called with an object.
@@ -103,17 +52,8 @@ intrusive_ptr<DocumentSource> DocumentSourceAddFields::createFromBson(
             elem.type() == Object);
 
     // Create the AddFields aggregation stage.
-    return new DocumentSourceAddFields(expCtx, ParsedAddFields::create(elem.Obj()));
-}
+    return {DocumentSourceSingleDocumentTransformation(expCtx, ParsedAddFields::create(elem.Obj()),
+        "$addFields", SEE_NEXT)};
+};
 
-DocumentSource::GetDepsReturn DocumentSourceAddFields::getDependencies(DepsTracker* deps) const {
-    // We will definitely need the fields that we use in computed expressions.
-    _parsedAddFields->addDependencies(deps);
-    // For the rest of the fields, see if the next stage needs them.
-    return SEE_NEXT;
-}
-
-void DocumentSourceAddFields::doInjectExpressionContext() {
-    _parsedAddFields->injectExpressionContext(pExpCtx);
-}
 }
