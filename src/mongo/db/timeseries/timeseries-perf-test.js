@@ -7,8 +7,9 @@ load("utils.js");
 
 	Random.setRandomSeed();
 
-	var SCALAR = 50;
-	var NUMDOCS = 100000;
+	var SCALAR = 1;
+	var NUMDOCS = 10000;
+	var BUFFERSIZE = 100;
 
 	function _genRandomDoc(i) {
 		return {
@@ -18,9 +19,14 @@ load("utils.js");
 		};
 	}
 
+	var dateMillis = 0;
+	function _getSequentialDate() {
+		return new Date(dateMillis++);
+	}
+
 	function _genDoc(i) {
 		return {
-			_id: new Date(i),
+			_id: _getSequentialDate(),
 			value: Random.srand(),
 			//str: generateRandomString(256),
 		}
@@ -165,12 +171,21 @@ load("utils.js");
 		testResults['name'] = testcase;
 
 
+		print("Inserting " + (nDocs / SCALAR) + " docs");
 		print("@@START@@");
 		testResults['start'] = new Date();
+		testResults['insertTime'] = 0;
 
-		for (var i = 0; i < nDocs; i+= SCALAR) {
-			var doc = docGenerator(i);
-			coll.insert(doc);
+		for (var i = 0; i < nDocs; i+= BUFFERSIZE) {
+			var docs = [];
+			for (var j = 0; j < BUFFERSIZE; j++) {
+				docs.push(docGenerator());
+			}
+			var start = Date.now();
+			docs.forEach(function(doc){
+				coll.insert(doc);
+			});
+			testResults['insertTime'] += (Date.now() - start);
 		}
 
 		testResults['end'] = new Date();
@@ -199,8 +214,8 @@ load("utils.js");
 	res.push(runInsertTestFromList("regular-sequential-pregenerated", NUMDOCS, _allDocs, "data3", false, false));
 	res.push(runInsertTestFromList("ts-sequential-pregenerated", NUMDOCS, _allDocs, "tsv3", false, true));
 
-	res.push(runInsertTest("regular-sequential-replication", NUMDOCS, _genDoc, "data4", false, false));
-	res.push(runInsertTest("ts-sequential-replication", NUMDOCS, _genDoc, "tsv4", false, true));
+	//res.push(runInsertTest("regular-sequential-replication", NUMDOCS, _genDoc, "data4", false, false));
+	//res.push(runInsertTest("ts-sequential-replication", NUMDOCS, _genDoc, "tsv4", false, true));
 
 	//res.push(runInsertTest("regular-random", NUMDOCS, _genRandomDoc, "data", false, false));
 	//res.push(runInsertTest("ts-random", NUMDOCS, _genRandomDoc, "tsv", false, true));
