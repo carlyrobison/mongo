@@ -134,7 +134,7 @@ public:
 
     /* Inserts a document into the corresponding batch.
      * Creates the batch if necessary. */
-    void insert(OperationContext* txn, const BSONObj& doc, bool persistent = false);
+    void insert(OperationContext* txn, const BSONObj& doc, BSONObjBuilder* replyBuilder, bool persistent = false);
 
     /* Loads a batch into the cache and the cache list */
     BSONObj findBatch(OperationContext* txn, batchIdType batchId);

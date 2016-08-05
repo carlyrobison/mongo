@@ -1622,7 +1622,7 @@ bool Command::run(OperationContext* txn,
                         // insert to timeseries returns boost::optional<BSONArray> 
 
                         // insert the object into the in-memory data store
-                        view->getTSCache()->insert(txn, docToInsert);
+                        view->getTSCache()->insert(txn, docToInsert, &inPlaceReplyBob);
                         // log() << "Insert of " << docToInsert << " completed.";
 
                         // Get batch to save to the backing collection
