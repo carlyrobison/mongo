@@ -34,14 +34,13 @@
 #include <memory>
 
 #include "mongo/bson/bsonelement.h"
-#include "mongo/db/pipeline/field_path.h"
 #include "mongo/db/pipeline/document_source.h"
+#include "mongo/db/pipeline/field_path.h"
 
 namespace mongo {
 
 class BSONObj;
 class Document;
-struct DepsTracker;
 struct ExpressionContext;
 
 namespace parsed_aggregation_projection {
@@ -134,11 +133,6 @@ public:
      * track which variables are defined so that they can later be referenced at execution time.
      */
     virtual void parse(const BSONObj& spec) = 0;
-
-    /**
-     * Serialize this projection.
-     */
-    virtual Document serialize(bool explain = false) const = 0;
 
     /**
      * Optimize any expressions contained within this projection.

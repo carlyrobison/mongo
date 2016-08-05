@@ -52,8 +52,7 @@ std::vector<intrusive_ptr<DocumentSource>> DocumentSourceAddFields::createFromBs
             elem.type() == Object);
 
     // Create the AddFields aggregation stage.
-    return {DocumentSourceSingleDocumentTransformation(expCtx, ParsedAddFields::create(elem.Obj()),
-        "$addFields", SEE_NEXT)};
+    return {new DocumentSourceSingleDocumentTransformation(expCtx, ParsedAddFields::create(elem.Obj()), "$addFields", DocumentSource::SEE_NEXT)};
 };
 
 }

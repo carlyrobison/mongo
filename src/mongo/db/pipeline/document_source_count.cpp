@@ -66,8 +66,9 @@ vector<intrusive_ptr<DocumentSource>> DocumentSourceCount::createFromBson(
     BSONObj projectObj = BSON("$project" << BSON("_id" << 0 << elemString << 1));
 
     auto groupSource = DocumentSourceGroup::createFromBson(groupObj.firstElement(), pExpCtx);
+    // Since Project is an alias, creating it returns a vector of stages, which has length 1.
     auto projectSource = DocumentSourceProject::createFromBson(projectObj.firstElement(), pExpCtx);
 
-    return {groupSource, projectSource};
+    return {groupSource, projectSource[0]};
 }
 }  // namespace mongo

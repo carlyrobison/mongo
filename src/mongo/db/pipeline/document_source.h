@@ -50,8 +50,6 @@
 #include "mongo/db/pipeline/expression.h"
 #include "mongo/db/pipeline/expression_context.h"
 #include "mongo/db/pipeline/lookup_set_cache.h"
-#include "mongo/db/pipeline/parsed_add_fields.h"
-#include "mongo/db/pipeline/parsed_aggregation_projection.h"
 #include "mongo/db/pipeline/pipeline.h"
 #include "mongo/db/pipeline/value.h"
 #include "mongo/db/pipeline/value_comparator.h"
@@ -984,15 +982,15 @@ public:
  */
 class ParsedSingleDocumentTransformation {
 public:
-    virtual void optimize();
+    virtual void optimize() = 0;
 
-    virtual Document applyTransformation(Document input);
+    virtual Document applyTransformation(Document input) = 0;
 
-    virtual Document serialize(bool explain);
+    virtual Document serialize(bool explain) const = 0;
 
-    virtual void addDependencies(DepsTracker* deps);
+    virtual void addDependencies(DepsTracker* deps) const = 0;
 
-    virtual void injectExpressionContext(const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+    virtual void injectExpressionContext(const boost::intrusive_ptr<ExpressionContext>& pExpCtx) = 0;
 };
 
 /** 
@@ -1017,6 +1015,11 @@ public:
     Pipeline::SourceContainer::iterator optimizeAt(Pipeline::SourceContainer::iterator itr, Pipeline::SourceContainer* container);
     void doInjectExpressionContext();
     DocumentSource::GetDepsReturn getDependencies(DepsTracker* deps) const;
+
+    // static boost::intrusive_ptr<DocumentSource> createFromBson(
+    //     const boost::intrusive_ptr<ExpressionContext>& expCtx,
+    //     std::unique_ptr<ParsedSingleDocumentTransformation> parsedTransform,
+    //     const char* name, const GetDepsReturn depsReturnType);
 
 private:
     std::unique_ptr<ParsedSingleDocumentTransformation> _parsedTransform;

@@ -3836,7 +3836,7 @@ public:
         const auto* groupStage = dynamic_cast<DocumentSourceGroup*>(result[0].get());
         ASSERT(groupStage);
 
-        const auto* projectStage = dynamic_cast<DocumentSourceProject*>(result[1].get());
+        const auto* projectStage = dynamic_cast<DocumentSourceSingleDocumentTransformation*>(result[1].get());
         ASSERT(projectStage);
 
         const bool explain = true;

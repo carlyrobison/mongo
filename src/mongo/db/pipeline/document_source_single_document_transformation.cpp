@@ -38,17 +38,18 @@
 
 namespace mongo {
 
+using boost::intrusive_ptr;
+
 DocumentSourceSingleDocumentTransformation::DocumentSourceSingleDocumentTransformation(
     const intrusive_ptr<ExpressionContext>& pExpCtx,
     std::unique_ptr<ParsedSingleDocumentTransformation> parsedTransform,
     const char* name, const GetDepsReturn depsReturnType)
-    : DocumentSource(expCtx),
+    : DocumentSource(pExpCtx),
     _parsedTransform(std::move(parsedTransform)),
     _name(name),
     _depsReturnType(depsReturnType) {}
 
-REGISTER_DOCUMENT_SOURCE(singleDocTransformation,
-    DocumentSourceSingleDocumentTransformation::createFromBson);
+//REGISTER_DOCUMENT_SOURCE(singleDocTransformation, DocumentSourceSingleDocumentTransformation::createFromBson);
 
 const char* DocumentSourceSingleDocumentTransformation::getSourceName() const {
     return _name;
@@ -90,16 +91,6 @@ Pipeline::SourceContainer::iterator DocumentSourceSingleDocumentTransformation::
         return itr == container->begin() ? itr : std::prev(itr);
     }
     return std::next(itr);
-}
-
-intrusive_ptr<DocumentSource> DocumentSourceSingleDocumentTransformation::createFromBson(
-    const intrusive_ptr<ExpressionContext>& expCtx,
-    std::unique_ptr<ParsedSingleDocumentTransformation> parsedTransform,
-    const char* name, const GetDepsReturn depsReturnType) {
-    // Checking that the specification was valid should be done by the function that creates parsedTransform.
-
-    // Create the SingleDocumentTransformation aggregation stage.
-    return new DocumentSourceSingleDocumentTransformation(expCtx, parsedTransform, name, depsReturnType);
 }
 
 DocumentSource::GetDepsReturn DocumentSourceSingleDocumentTransformation::getDependencies(DepsTracker* deps) const {

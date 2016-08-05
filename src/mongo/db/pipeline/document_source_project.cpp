@@ -43,19 +43,19 @@ using parsed_aggregation_projection::ProjectionType;
 
 REGISTER_DOCUMENT_SOURCE_ALIAS(project, DocumentSourceProject::createFromBson);
 
-vector<intrusive_ptr<DocumentSource>> DocumentSourceProject::createFromBson(
+std::vector<intrusive_ptr<DocumentSource>> DocumentSourceProject::createFromBson(
     BSONElement elem, const intrusive_ptr<ExpressionContext>& expCtx) {
     uassert(15969, "$project specification must be an object", elem.type() == Object);
 
-    ParsedAggregationProjection _parsedProject = ParsedAggregationProjection::create(elem.Obj());
+    std::unique_ptr<ParsedAggregationProjection> _parsedProject = ParsedAggregationProjection::create(elem.Obj());
 
     if (_parsedProject->getType() == ProjectionType::kInclusion) {
         // Stop looking for further dependencies later in the pipeline, since anything that is not
         // explicitly included or added in this projection will not exist after this stage, so would
         // be pointless to include in our dependencies.
-        return {DocumentSourceSingleDocumentTransformation(expCtx, _parsedProject, "$project", EXHAUSTIVE_FIELDS)};
+        return {new DocumentSourceSingleDocumentTransformation(expCtx, std::move(_parsedProject), "$project", DocumentSource::EXHAUSTIVE_FIELDS)};
     }
-    return {DocumentSourceSingleDocumentTransformation(expCtx, _parsedProject, "$project", SEE_NEXT)};
+    return {new DocumentSourceSingleDocumentTransformation(expCtx, std::move(_parsedProject), "$project", DocumentSource::SEE_NEXT)};
 };
 
 }  // namespace mongo
