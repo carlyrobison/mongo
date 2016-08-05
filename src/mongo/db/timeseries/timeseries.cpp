@@ -285,8 +285,7 @@ std::string TimeSeriesCache::toString(bool printBatches) const {
     return s.str();
 }
 
-void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, bool persistent) {
-    log() << "Inserting into cache";
+void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, BSONObjBuilder* replyBuilder, bool persistent) {
 	Date_t date = doc.getField("_id").Date();
     batchIdType batchId = _getBatchId(date);
 
@@ -321,6 +320,7 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, bool per
     massert(40193, "TimeSeriesCache::insert | Still no batch to insert into", _cache.find(batchId) != _cache.end());
 
     _cache[batchId].insert(doc);
+    replyBuilder->append("n", 1);
 
     if (persistent) {
         _cache[batchId].save(txn, _nss);
