@@ -58,8 +58,12 @@ Status collMod(OperationContext* txn,
     // May also modify a view instead of a collection.
     const ViewDefinition* view = db ? db->getViewCatalog()->lookup(txn, nss.ns()) : nullptr;
     boost::optional<ViewDefinition> newView;
-    if (view)
+    if (view) {
         newView = {*view};
+        if (view->timeseries()) {
+            return {ErrorCodes::InvalidOptions, "cannot modify timeseries collection"};
+        }
+    }
 
     // This can kill all cursors so don't allow running it while a background operation is in
     // progress.

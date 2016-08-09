@@ -54,7 +54,8 @@ public:
     ViewDefinition(StringData dbName,
                    StringData viewName,
                    StringData viewOnName,
-                   const BSONObj& pipeline);
+                   const BSONObj& pipeline,
+                   bool timeseries);
 
     /**
      * @return The fully-qualified namespace of this view.
@@ -79,6 +80,10 @@ public:
         return _pipeline;
     }
 
+    const bool timeseries() const {
+        return _timeseries;
+    }
+
     void setViewOn(const NamespaceString& viewOnNss);
 
     /**
@@ -90,5 +95,6 @@ private:
     NamespaceString _viewNss;
     NamespaceString _viewOnNss;
     std::vector<BSONObj> _pipeline;
+    bool _timeseries;
 };
 }  // namespace mongo

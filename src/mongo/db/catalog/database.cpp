@@ -447,6 +447,8 @@ void Database::_clearCollectionCache(OperationContext* txn,
 }
 
 Collection* Database::getCollection(StringData ns) const {
+    log() << "getCollection got " << ns;
+    log() << "db substring is " << nsToDatabaseSubstring(ns);
     invariant(_name == nsToDatabaseSubstring(ns));
     CollectionMap::const_iterator it = _collections.find(ns);
     if (it != _collections.end() && it->second) {
@@ -534,7 +536,7 @@ Status Database::createView(OperationContext* txn,
         return Status(ErrorCodes::InvalidNamespace,
                       str::stream() << "invalid namespace name for a view: " + nss.toString());
 
-    return _views.createView(txn, nss, viewOnNss, BSONArray(options.pipeline));
+    return _views.createView(txn, nss, viewOnNss, BSONArray(options.pipeline), options.timeseries);
 }
 
 
@@ -705,6 +707,25 @@ Status userCreateNS(OperationContext* txn,
 
     if (collectionOptions.isView()) {
         uassertStatusOK(db->createView(txn, ns, collectionOptions));
+    } else if(collectionOptions.timeseries) {
+        // If this is a timeseries view, create a backing collection with "_timeseries" appended.
+        NamespaceString nss(ns);
+
+        // Create the backing collection
+        auto backingNSS = NamespaceString(nss.db(), nss.coll().toString() + "_" + "timeseries");
+        db->createCollection(txn, backingNSS.ns(), collectionOptions, createDefaultIndexes);
+
+        // Construct the pipeline.
+        // Trying to get: {[{$unwind: "$_docs"}, {$replaceRoot: "$_docs"}]}
+        BSONArrayBuilder arrBuilder;
+        arrBuilder.append(BSON("$unwind" << "$_docs"));
+        arrBuilder.append(BSON("$replaceRoot" << BSON("newRoot" << "$_docs")));
+        BSONObj pipeline = arrBuilder.obj();
+
+        // Create the timeseries view
+        collectionOptions.pipeline = pipeline;
+        collectionOptions.viewOn = backingNSS.coll().toString();
+        db->createView(txn, ns, collectionOptions);
     } else {
         invariant(db->createCollection(txn, ns, collectionOptions, createDefaultIndexes));
     }

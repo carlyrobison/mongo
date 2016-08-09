@@ -108,6 +108,7 @@ void CollectionOptions::reset() {
     collation = BSONObj();
     viewOn = "";
     pipeline = BSONObj();
+    timeseries = false;
 }
 
 bool CollectionOptions::isValid() const {
@@ -241,6 +242,8 @@ Status CollectionOptions::parse(const BSONObj& options) {
             }
 
             pipeline = e.Obj().getOwned();
+        } else if (fieldName == "timeseries") {
+            timeseries = e.trueValue();
         }
     }
 
@@ -305,6 +308,10 @@ BSONObj CollectionOptions::toBSON() const {
 
     if (!pipeline.isEmpty()) {
         b.append("pipeline", pipeline);
+    }
+
+    if (timeseries) {
+        b.append("timeseries", true);
     }
 
     return b.obj();
