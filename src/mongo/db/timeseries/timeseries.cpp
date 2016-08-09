@@ -40,6 +40,7 @@
 #include "mongo/db/db_raii.h"
 #include "mongo/db/ops/update_result.h"
 #include "mongo/util/mongoutils/str.h"
+#include "mongo/db/ftdc/config.h"
 
 #include "mongo/db/dbhelpers.h"
 
@@ -47,7 +48,7 @@ namespace mongo {
 
 TimeSeriesBatch::TimeSeriesBatch(const BSONObj& batchDocument) {
     BSONObj batchDoc = batchDocument.getOwned();
-    //log() << "Creating batch from input doc: " << batchDoc;
+    // log() << "Creating batch from input doc: " << batchDoc;
     // Create a map entry for each doc in the docs subarray.
     for (const BSONElement& elem : batchDoc["_docs"].Array()) {
         BSONObj obj = elem.Obj();
@@ -156,6 +157,96 @@ bool TimeSeriesBatch::save(OperationContext* txn, const NamespaceString& nss) {
     return true;
 }
 
+TimeSeriesCompressor::TimeSeriesCompressor() {
+    FTDCConfig config;
+    _compressor = new FTDCCompressor(&config);
+}
+
+TimeSeriesCompressor::TimeSeriesCompressor(const BSONObj& batchDocument) {
+    BSONObj batchDoc = batchDocument.getOwned();
+
+    // it will have a format of
+    // _id: (batch id)
+    // _docs: (compressed data buffer as bson)
+
+    // 1. Turn _docs value into a ConstDataRange
+    // 2. Create new Compressor with that data range
+    // 3. No easy way to put the existing data range into the compressor
+    // 4. Except for uncompressing back to documents and inserting
+
+    // Just make an empty batch.
+
+    // Create the batch Id from the batch document
+    _batchId = batchDoc["_id"].numberLong();
+
+    FTDCConfig config;
+    _compressor = new FTDCCompressor(&config);
+}
+
+TimeSeriesCompressor::TimeSeriesCompressor(batchIdType batchId) {
+    _batchId = batchId;
+
+    FTDCConfig config;
+    _compressor = new FTDCCompressor(&config);
+}
+
+std::string TimeSeriesCompressor::toString(bool includeTime) const {
+    StringBuilder s;
+    s << ("Batch number: ");
+    s << (_batchId);
+    return s.str();
+}
+
+void TimeSeriesCompressor::insert(const BSONObj& doc, const Date_t& date) {
+    BSONObj newDoc = doc.getOwned();  // internally copies if necessary
+
+    /* Adds this document to the map of documents, based on date. */
+    auto st = _compressor->addSample(doc, date);
+    massert(40195, "Insert was not OK", st.isOK());
+    if (std::get<1>(st.getValue().get()) == FTDCCompressor::CompressorState::kCompressorFull) {
+        log() << "WE NEED TO SAVE!!!";
+    }
+}
+
+BSONObj TimeSeriesCompressor::retrieveBatch() {
+    // build BSON object iteself
+    BSONObjBuilder builder;
+    builder.append("_id", _batchId);
+    StatusWith<std::tuple<ConstDataRange, Date_t>> swBuf = _compressor->getCompressedSamples();
+    massert(40196, "Retrieval was not OK", swBuf.isOK());
+    ConstDataRange dataRange = std::get<0>(swBuf.getValue());
+    auto bsonst = dataRange.read<BSONElement>();
+    massert(40197, "Read was not OK", bsonst.isOK());
+    BSONElement bsondata = bsonst.getValue();
+    log() << "compressed data: " << bsondata;
+    builder.append("_docs", bsondata);
+    log() << builder.asTempObj();
+    return builder.obj();
+}
+
+batchIdType TimeSeriesCompressor::_thisBatchId() {
+    return _batchId;
+}
+
+bool TimeSeriesCompressor::save(OperationContext* txn, const NamespaceString& nss) {
+    //Create the update request
+    UpdateRequest request(nss);
+    request.setQuery(BSON("_id" << _batchId));
+    request.setUpdates(retrieveBatch());
+    request.setUpsert(true);
+
+    // get the database NEEDS SERVERONLY
+    AutoGetOrCreateDb autoDb(txn, nss.db(), MODE_IX);
+
+    // update!
+    UpdateResult result = ::mongo::update(txn, autoDb.getDb(), request);
+
+    // See what we got
+    //log() << "result of save: " << result;
+    //massert(result.numMatched == 1);
+
+    return true;
+}
 
 TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss) {
     log() << "NamespaceString: " << nss.ns();

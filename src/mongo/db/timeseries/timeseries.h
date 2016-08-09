@@ -32,6 +32,7 @@
 #include "mongo/util/time_support.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/ftdc/compressor.h"
 
 #include <string>
 #include <assert.h>
@@ -114,7 +115,45 @@ private:
 
     /* batch should own the docs so use emplace */
     std::map<Date_t, BSONObj> _docs;
+};
 
+/**
+ * Like a batch, but FTDC compressed
+ */
+class TimeSeriesCompressor {
+public:
+    /**
+     * Sets the current batch id and initializes the map.
+     */
+    TimeSeriesCompressor(batchIdType batchId);
+
+    /**
+     * Constructs a batch object from the retrieved bson document.
+     */
+    TimeSeriesCompressor(const BSONObj& batchDocument);
+
+    TimeSeriesCompressor();
+
+    std::string toString(bool includeTime = false) const;
+
+    /**
+     * Inserts a document into the time series DB.
+     */
+    void insert(const BSONObj& doc, const Date_t& date);
+
+    /* Retrieves the single BSONObj for the batch document. */
+    BSONObj retrieveBatch();
+
+    /* Reports this batch's batch Id */
+    batchIdType _thisBatchId();
+
+    /* Saves a specific batch to a collection */
+    bool save(OperationContext* txn, const NamespaceString& nss);
+
+private:
+    batchIdType _batchId;
+
+    FTDCCompressor* _compressor;
 };
 
 
