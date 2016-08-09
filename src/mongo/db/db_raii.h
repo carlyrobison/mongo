@@ -35,6 +35,7 @@
 #include "mongo/db/concurrency/d_concurrency.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/operation_context.h"
+#include "mongo/db/timeseries/timeseries.h"
 #include "mongo/db/views/view.h"
 #include "mongo/util/timer.h"
 
@@ -114,10 +115,43 @@ private:
     const Lock::CollectionLock _collLock;
     Collection* const _coll;
 
+    friend class AutoGetCollectionOrTimeseries;
     friend class AutoGetCollectionForRead;
     friend class AutoGetCollectionOrViewForRead;
 };
 
+class AutoGetCollectionOrTimeseries {
+    MONGO_DISALLOW_COPYING(AutoGetCollectionOrTimeseries);
+public:
+    AutoGetCollectionOrTimeseries(OperationContext* txn,
+        const NamespaceString& nss,
+        LockMode modeAll);
+
+    Database* getDb() const {
+        return _autoColl->getDb();
+    }
+
+    Collection* getCollection() const {
+        if (_timeseries) {
+            return _timeseriesCollection->getCollection();
+        }
+        return _autoColl->getCollection();
+    }
+
+    TimeSeriesCache& getTimeseriesCache() const {
+        return _timeseriesView->getTimeSeriesCache().get();
+    }
+
+    bool isTimeseries() const {
+        return _timeseries;
+    }
+
+private:
+    // Refers to the backing collection if this is timeseries view.
+    boost::optional<AutoGetCollection> _autoColl, _timeseriesCollection;
+    ViewDefinition* _timeseriesView;
+    bool _timeseries = false;
+};
 /**
  * RAII-style class, which acquires a lock on the specified database in the requested mode and
  * obtains a reference to the database, creating it was non-existing. Used as a shortcut for

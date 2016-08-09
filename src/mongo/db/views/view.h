@@ -33,6 +33,7 @@
 #include "mongo/base/string_data.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/namespace_string.h"
+#include "mongo/db/timeseries/timeseries.h"
 
 namespace mongo {
 
@@ -80,7 +81,7 @@ public:
         return _pipeline;
     }
 
-    const bool timeseries() const {
+    const bool isTimeseries() const {
         return _timeseries;
     }
 
@@ -91,10 +92,15 @@ public:
      */
     void setPipeline(const BSONElement& pipeline);
 
+    boost::optional<TimeSeriesCache>& getTimeSeriesCache() {
+        return _tsCache;
+    }
+
 private:
     NamespaceString _viewNss;
     NamespaceString _viewOnNss;
     std::vector<BSONObj> _pipeline;
     bool _timeseries;
+    boost::optional<TimeSeriesCache> _tsCache;
 };
 }  // namespace mongo

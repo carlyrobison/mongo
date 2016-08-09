@@ -447,8 +447,6 @@ void Database::_clearCollectionCache(OperationContext* txn,
 }
 
 Collection* Database::getCollection(StringData ns) const {
-    log() << "getCollection got " << ns;
-    log() << "db substring is " << nsToDatabaseSubstring(ns);
     invariant(_name == nsToDatabaseSubstring(ns));
     CollectionMap::const_iterator it = _collections.find(ns);
     if (it != _collections.end() && it->second) {

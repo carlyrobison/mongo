@@ -60,7 +60,7 @@ Status collMod(OperationContext* txn,
     boost::optional<ViewDefinition> newView;
     if (view) {
         newView = {*view};
-        if (view->timeseries()) {
+        if (view->isTimeseries()) {
             return {ErrorCodes::InvalidOptions, "cannot modify timeseries collection"};
         }
     }

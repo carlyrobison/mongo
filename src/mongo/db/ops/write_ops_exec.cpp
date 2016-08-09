@@ -323,7 +323,7 @@ static bool insertBatchAndHandleErrors(OperationContext* txn,
 
     auto& curOp = *CurOp::get(txn);
 
-    boost::optional<AutoGetCollection> collection;
+    boost::optional<AutoGetCollectionOrTimeseries> collection;
     auto acquireCollection = [&] {
         while (true) {
             txn->checkForInterrupt();
@@ -333,7 +333,7 @@ static bool insertBatchAndHandleErrors(OperationContext* txn,
             }
 
             collection.emplace(txn, wholeOp.ns, MODE_IX);
-            if (collection->getCollection())
+            if (collection->getCollection() || collection->isTimeseries())
                 break;
 
             collection.reset();  // unlock.
@@ -346,7 +346,7 @@ static bool insertBatchAndHandleErrors(OperationContext* txn,
 
     try {
         acquireCollection();
-        if (!collection->getCollection()->isCapped() && batch.size() > 1) {
+        if (!collection->isTimeseries() && !collection->getCollection()->isCapped() && batch.size() > 1) {
             // First try doing it all together. If all goes well, this is all we need to do.
             // See Collection::_insertDocuments for why we do all capped inserts one-at-a-time.
             lastOpFixer->startingOp();
@@ -374,7 +374,12 @@ static bool insertBatchAndHandleErrors(OperationContext* txn,
                     if (!collection)
                         acquireCollection();
                     lastOpFixer->startingOp();
-                    insertDocuments(txn, collection->getCollection(), it, it + 1);
+                    if (collection->isTimeseries()) {
+                        log() << "Inserting into time series cache";
+                        collection->getTimeseriesCache().insert(txn, *it);
+                    } else {
+                        insertDocuments(txn, collection->getCollection(), it, it + 1);
+                    }
                     lastOpFixer->finishedOpSuccessfully();
                     out->results.emplace_back(WriteResult::SingleResult{1});
                     curOp.debug().ninserted++;

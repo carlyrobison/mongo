@@ -43,6 +43,9 @@ ViewDefinition::ViewDefinition(StringData dbName,
     for (BSONElement e : pipeline) {
         _pipeline.push_back(e.Obj().getOwned());
     }
+    if (timeseries) {
+        _tsCache.emplace(_viewOnNss);
+    }
 }
 
 void ViewDefinition::setViewOn(const NamespaceString& viewOnNss) {

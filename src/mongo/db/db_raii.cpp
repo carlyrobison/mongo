@@ -77,6 +77,19 @@ AutoGetOrCreateDb::AutoGetOrCreateDb(OperationContext* txn, StringData ns, LockM
     }
 }
 
+AutoGetCollectionOrTimeseries::AutoGetCollectionOrTimeseries(OperationContext* txn,
+    const NamespaceString& nss,
+    LockMode modeAll) {
+    _autoColl.emplace(txn, nss, modeAll, modeAll, AutoGetCollection::ViewMode::kViewsPermitted);
+    ViewDefinition* viewDef = _autoColl->getDb()->getViewCatalog()->lookup(txn, nss.ns());
+    if (viewDef) {
+        uassert(ErrorCodes::CommandNotSupportedOnView, str::stream() << "Namespace " << nss.ns() << " is not a timeseries view", viewDef->isTimeseries());
+        _timeseries = true;
+        _timeseriesView = viewDef;
+        _timeseriesCollection.emplace(txn, viewDef->viewOn(), modeAll, modeAll, AutoGetCollection::ViewMode::kViewsPermitted);
+    }
+}
+
 AutoGetCollectionForRead::AutoGetCollectionForRead(OperationContext* txn,
                                                    const NamespaceString& nss,
                                                    AutoGetCollection::ViewMode viewMode)
