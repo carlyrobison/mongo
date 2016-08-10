@@ -1,28 +1,14 @@
 #-*- mode: python -*-
 
-# Import("env")
+Import("env")
 
-# env.Library(
-#     target= 'timeseries',
-#         source=[
-#             'timeseries.cpp',
-#     ],
-#      LIBDEPS=[
-#         '$BUILD_DIR/mongo/base',
-#         #'$BUILD_DIR/mongo/db/service_context',
-#         '$BUILD_DIR/mongo/db/serveronly',
-#         #'$BUILD_DIR/mongo/db/commands',
-#         #'$BUILD_DIR/mongo/db/commands/core'
-#         #'$BUILD_DIR/mongo/db/commands_test_crutch',
-#     ]
-# )
-
-# env.CppUnitTest(
-#         target='timeseries_test',
-#         source=[
-#             'timeseries_test.cpp',
-#         ],
-#         LIBDEPS=[
-#             '$BUILD_DIR/mongo/db/timeseries/timeseries',
-#         ],
-# )
+env.Library(
+    target= 'timeseries',
+        source=[
+            'timeseries.cpp',
+    ],
+     LIBDEPS=[
+        '$BUILD_DIR/mongo/base',
+        '$BUILD_DIR/mongo/db/service_context',
+    ]
+)
