@@ -6,6 +6,7 @@ env.Library(
     target= 'timeseries',
         source=[
             'timeseries.cpp',
+            'timeseries_monitor.cpp',
     ],
      LIBDEPS=[
         '$BUILD_DIR/mongo/base',

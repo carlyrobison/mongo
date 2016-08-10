@@ -122,10 +122,11 @@ private:
 
 class AutoGetCollectionOrTimeseries {
     MONGO_DISALLOW_COPYING(AutoGetCollectionOrTimeseries);
+
 public:
     AutoGetCollectionOrTimeseries(OperationContext* txn,
-        const NamespaceString& nss,
-        LockMode modeAll);
+                                  const NamespaceString& nss,
+                                  LockMode modeAll);
 
     Database* getDb() const {
         return _autoColl->getDb();
@@ -138,8 +139,8 @@ public:
         return _autoColl->getCollection();
     }
 
-    TimeSeriesCache& getTimeseriesCache() const {
-        return _timeseriesView->getTimeSeriesCache().get();
+    TimeSeriesCache* getTimeseriesCache() const {
+        return _timeseriesView->getTimeSeriesCache();
     }
 
     bool isTimeseries() const {

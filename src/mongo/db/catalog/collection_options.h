@@ -122,6 +122,7 @@ struct CollectionOptions {
     BSONObj pipeline;
 
     // True if this collection is a timeseries one.
-    bool timeseries;
+    bool timeseries = false;
+    bool compression = false;
 };
 }

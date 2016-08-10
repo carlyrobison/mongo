@@ -109,6 +109,7 @@ void CollectionOptions::reset() {
     viewOn = "";
     pipeline = BSONObj();
     timeseries = false;
+    compression = false;
 }
 
 bool CollectionOptions::isValid() const {
@@ -244,6 +245,8 @@ Status CollectionOptions::parse(const BSONObj& options) {
             pipeline = e.Obj().getOwned();
         } else if (fieldName == "timeseries") {
             timeseries = e.trueValue();
+        } else if (fieldName == "compression") {
+            compression = e.trueValue();
         }
     }
 

@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include "mongo/base/string_data.h"
@@ -56,7 +57,10 @@ public:
                    StringData viewName,
                    StringData viewOnName,
                    const BSONObj& pipeline,
-                   bool timeseries);
+                   bool timeseries,
+                   bool timeseriesCompressed = false);
+
+    ViewDefinition(const ViewDefinition&);
 
     /**
      * @return The fully-qualified namespace of this view.
@@ -92,15 +96,15 @@ public:
      */
     void setPipeline(const BSONElement& pipeline);
 
-    boost::optional<TimeSeriesCache>& getTimeSeriesCache() {
-        return _tsCache;
+    TimeSeriesCache* getTimeSeriesCache() {
+        return _tsCache.get();
     }
 
 private:
     NamespaceString _viewNss;
     NamespaceString _viewOnNss;
     std::vector<BSONObj> _pipeline;
-    bool _timeseries;
-    boost::optional<TimeSeriesCache> _tsCache;
+    bool _timeseries, _timeseriesCompressed;
+    std::unique_ptr<TimeSeriesCache> _tsCache;
 };
 }  // namespace mongo

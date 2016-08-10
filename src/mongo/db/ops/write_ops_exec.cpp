@@ -346,7 +346,8 @@ static bool insertBatchAndHandleErrors(OperationContext* txn,
 
     try {
         acquireCollection();
-        if (!collection->isTimeseries() && !collection->getCollection()->isCapped() && batch.size() > 1) {
+        if (!collection->isTimeseries() && !collection->getCollection()->isCapped() &&
+            batch.size() > 1) {
             // First try doing it all together. If all goes well, this is all we need to do.
             // See Collection::_insertDocuments for why we do all capped inserts one-at-a-time.
             lastOpFixer->startingOp();
@@ -376,7 +377,7 @@ static bool insertBatchAndHandleErrors(OperationContext* txn,
                     lastOpFixer->startingOp();
                     if (collection->isTimeseries()) {
                         log() << "Inserting into time series cache";
-                        collection->getTimeseriesCache().insert(txn, *it);
+                        collection->getTimeseriesCache()->insert(txn, *it);
                     } else {
                         insertDocuments(txn, collection->getCollection(), it, it + 1);
                     }

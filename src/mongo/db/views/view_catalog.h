@@ -82,7 +82,8 @@ public:
                       const NamespaceString& viewName,
                       const NamespaceString& viewOn,
                       const BSONArray& pipeline,
-                      bool timeseries);
+                      bool timeseries,
+                      bool timeseriesCompressed = false);
 
     /**
      * Drop the view named 'viewName'.
@@ -142,7 +143,8 @@ private:
                                       const NamespaceString& viewName,
                                       const NamespaceString& viewOn,
                                       const BSONArray& pipeline,
-                                      bool timeseries);
+                                      bool timeseries,
+                                      bool timeseriesCompressed = false);
     /**
      * Parses the view definition pipeline, attempts to upsert into the view graph, and refreshes
      * the graph if necessary. Returns an error status if the resulting graph would be invalid.

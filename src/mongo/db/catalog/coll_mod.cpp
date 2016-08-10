@@ -59,7 +59,7 @@ Status collMod(OperationContext* txn,
     const ViewDefinition* view = db ? db->getViewCatalog()->lookup(txn, nss.ns()) : nullptr;
     boost::optional<ViewDefinition> newView;
     if (view) {
-        newView = {*view};
+        newView.emplace(*view);
         if (view->isTimeseries()) {
             return {ErrorCodes::InvalidOptions, "cannot modify timeseries collection"};
         }

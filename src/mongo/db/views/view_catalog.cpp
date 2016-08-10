@@ -71,8 +71,11 @@ Status ViewCatalog::_reloadIfNeeded_inlock(OperationContext* txn) {
 
     Status status = _durable->iterate(txn, [&](const BSONObj& view) {
         NamespaceString viewName(view["_id"].str());
-        ViewDefinition def(
-            viewName.db(), viewName.coll(), view["viewOn"].str(), view["pipeline"].Obj(), view["timeseries"].trueValue());
+        ViewDefinition def(viewName.db(),
+                           viewName.coll(),
+                           view["viewOn"].str(),
+                           view["pipeline"].Obj(),
+                           view["timeseries"].trueValue());
         _viewMap[viewName.ns()] = std::make_shared<ViewDefinition>(def);
     });
     _valid.store(status.isOK());
@@ -83,14 +86,23 @@ Status ViewCatalog::_createOrUpdateView_inlock(OperationContext* txn,
                                                const NamespaceString& viewName,
                                                const NamespaceString& viewOn,
                                                const BSONArray& pipeline,
-                                               bool timeseries) {
+                                               bool timeseries,
+                                               bool timeseriesCompressed) {
     invariant(_valid.load());
     BSONObj viewDef =
-        BSON("_id" << viewName.ns() << "viewOn" << viewOn.coll() << "pipeline" << pipeline << "timeseries" << timeseries);
+        BSON("_id" << viewName.ns() << "viewOn" << viewOn.coll() << "pipeline" << pipeline
+                   << "timeseries"
+                   << timeseries
+                   << "compressed"
+                   << timeseriesCompressed);
 
     BSONObj ownedPipeline = pipeline.getOwned();
-    auto view = std::make_shared<ViewDefinition>(
-        viewName.db(), viewName.coll(), viewOn.coll(), ownedPipeline, timeseries);
+    auto view = std::make_shared<ViewDefinition>(viewName.db(),
+                                                 viewName.coll(),
+                                                 viewOn.coll(),
+                                                 ownedPipeline,
+                                                 timeseries,
+                                                 timeseriesCompressed);
 
     // Check that the resulting dependency graph is acyclic and within the maximum depth.
     Status graphStatus = _upsertIntoGraph(txn, *(view.get()));
@@ -162,7 +174,8 @@ Status ViewCatalog::createView(OperationContext* txn,
                                const NamespaceString& viewName,
                                const NamespaceString& viewOn,
                                const BSONArray& pipeline,
-                               bool timeseries) {
+                               bool timeseries,
+                               bool compressed) {
     stdx::lock_guard<stdx::mutex> lk(_mutex);
 
     if (!enableViews)
@@ -179,7 +192,7 @@ Status ViewCatalog::createView(OperationContext* txn,
         return Status(ErrorCodes::InvalidNamespace,
                       str::stream() << "invalid name for 'viewOn': " << viewOn.coll());
 
-    return _createOrUpdateView_inlock(txn, viewName, viewOn, pipeline, timeseries);
+    return _createOrUpdateView_inlock(txn, viewName, viewOn, pipeline, timeseries, compressed);
 }
 
 Status ViewCatalog::modifyView(OperationContext* txn,

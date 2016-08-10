@@ -534,7 +534,8 @@ Status Database::createView(OperationContext* txn,
         return Status(ErrorCodes::InvalidNamespace,
                       str::stream() << "invalid namespace name for a view: " + nss.toString());
 
-    return _views.createView(txn, nss, viewOnNss, BSONArray(options.pipeline), options.timeseries);
+    return _views.createView(
+        txn, nss, viewOnNss, BSONArray(options.pipeline), options.timeseries, options.compression);
 }
 
 
@@ -705,19 +706,25 @@ Status userCreateNS(OperationContext* txn,
 
     if (collectionOptions.isView()) {
         uassertStatusOK(db->createView(txn, ns, collectionOptions));
-    } else if(collectionOptions.timeseries) {
+    } else if (collectionOptions.timeseries) {
         // If this is a timeseries view, create a backing collection with "_timeseries" appended.
         NamespaceString nss(ns);
 
         // Create the backing collection
         auto backingNSS = NamespaceString(nss.db(), nss.coll().toString() + "_" + "timeseries");
+        uassert(40277, str::stream() << "Backing collection " << backingNSS.toString() << " exists", !db->getCollection(backingNSS));
         db->createCollection(txn, backingNSS.ns(), collectionOptions, createDefaultIndexes);
 
         // Construct the pipeline.
         // Trying to get: {[{$unwind: "$_docs"}, {$replaceRoot: "$_docs"}]}
         BSONArrayBuilder arrBuilder;
-        arrBuilder.append(BSON("$unwind" << "$_docs"));
-        arrBuilder.append(BSON("$replaceRoot" << BSON("newRoot" << "$_docs")));
+        if (collectionOptions.compression) {
+
+        } else {
+            arrBuilder.append(BSON("$unwind" << "$_docs"));
+            arrBuilder.append(BSON("$replaceRoot" << BSON("newRoot" << "$_docs")));
+        }
+        
         BSONObj pipeline = arrBuilder.obj();
 
         // Create the timeseries view

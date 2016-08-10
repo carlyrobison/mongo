@@ -86,7 +86,8 @@ Status DurableViewCatalogImpl::iterate(OperationContext* txn, Callback callback)
         bool valid = true;
         for (const BSONElement& e : viewDef) {
             std::string name(e.fieldName());
-            valid &= name == "_id" || name == "viewOn" || name == "pipeline" || name == "timeseries";
+            valid &= name == "_id" || name == "viewOn" || name == "pipeline" ||
+                name == "timeseries" || name == "compressed";
         }
         NamespaceString viewName(viewDef["_id"].str());
         valid &= viewName.isValid() && viewName.db() == _db->name();

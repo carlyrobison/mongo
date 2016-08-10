@@ -29,15 +29,16 @@
 #pragma once
 
 #include "mongo/bson/bsonobj.h"
-#include "mongo/util/time_support.h"
+#include "mongo/db/ftdc/compressor.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/service_context.h"
-#include "mongo/db/ftdc/compressor.h"
+#include "mongo/stdx/mutex.h"
+#include "mongo/util/time_support.h"
 
-#include <string>
 #include <assert.h>
-#include <map>
 #include <list>
+#include <map>
+#include <string>
 
 namespace mongo {
 
@@ -51,6 +52,7 @@ static const batchIdType NUM_MILLIS_IN_BATCH = 1000;
 // Error code for a batch that doesn't exist.
 static const int BATCH_NONEXISTENT = 40154;
 
+
 /**
  * Represents a single time series batch.
  *
@@ -61,19 +63,19 @@ static const int BATCH_NONEXISTENT = 40154;
  *     docs: [{}, {}, ...]
  * }
  */
-class TimeSeriesBatch {
+class Batch {
 public:
     /**
      * Sets the current batch id and initializes the map.
      */
-    TimeSeriesBatch(batchIdType batchId);
+    Batch(batchIdType batchId, bool compressed);
 
     /**
      * Constructs a batch object from the bson document.
      */
-    TimeSeriesBatch(const BSONObj& batchDocument);
+    Batch(const BSONObj& batchDocument, bool compressed);
 
-    TimeSeriesBatch() {};
+    Batch(){};
 
     std::string toString(bool incldeTime = false) const;
 
@@ -107,68 +109,42 @@ public:
 
     /* Assuming this is the deconstructor. Saves the contents of the buffer
      * (on disk?) and disappears */
-    // ~TimeSeriesBatch();
+    // ~Batch();
 
+    // Returns true if this batch should be flushed and sets _needsFlush to true.
+    bool checkIfNeedsFlushAndReset();
 
 private:
     batchIdType _batchId;
+    bool _needsFlush = false;
 
     /* batch should own the docs so use emplace */
     std::map<Date_t, BSONObj> _docs;
+    bool _compressed = false;
+    FTDCConfig _ftdcConfig;
+    std::unique_ptr<FTDCCompressor> _compressor;
+    std::string unused;
 };
 
 /**
- * Like a batch, but FTDC compressed
- */
-class TimeSeriesCompressor {
-public:
-    /**
-     * Sets the current batch id and initializes the map.
-     */
-    TimeSeriesCompressor(batchIdType batchId);
-
-    /**
-     * Constructs a batch object from the retrieved bson document.
-     */
-    TimeSeriesCompressor(const BSONObj& batchDocument);
-
-    TimeSeriesCompressor();
-
-    std::string toString(bool includeTime = false) const;
-
-    /**
-     * Inserts a document into the time series DB.
-     */
-    void insert(const BSONObj& doc, const Date_t& date);
-
-    /* Retrieves the single BSONObj for the batch document. */
-    BSONObj retrieveBatch();
-
-    /* Reports this batch's batch Id */
-    batchIdType _thisBatchId();
-
-    /* Saves a specific batch to a collection */
-    bool save(OperationContext* txn, const NamespaceString& nss);
-
-private:
-    batchIdType _batchId;
-
-    FTDCCompressor* _compressor;
-};
-
-
-/**
- * Manages multiple time series batches in memory.
+ * Manages multiple time series batches in memory. This is thread safe.
  */
 class TimeSeriesCache {
 public:
-    TimeSeriesCache(const NamespaceString& nss);
+    TimeSeriesCache(const NamespaceString& nss, bool compressed = false);
 
     std::string toString(bool printBatches = false) const;
 
     /* Inserts a document into the corresponding batch.
      * Creates the batch if necessary. */
     void insert(OperationContext* txn, const BSONObj& doc);
+
+    void flushIfNecessary(OperationContext* txn);
+
+    // When trying to get rid of TS Cache, save everything to the collection. TODO.
+    // ~TimeSeriesCache();
+
+private:
 
     /* Loads a batch into the cache and the cache list */
     BSONObj findBatch(OperationContext* txn, batchIdType batchId);
@@ -199,16 +175,12 @@ public:
      */
     bool saveToCollection();
 
-    // When trying to get rid of TS Cache, save everything to the collection
-    // ~TimeSeriesCache();
-
-private:
     /* Cache methods that should not be able to be called by external classes */
 
-    /* Evicts a batch and saves it to the backing collection in doing so.
-     * Returns the batch Id of the cache that was evicted. Uses an LRU algorithm
-     * to determine which batch to evict. */
-    batchIdType evictBatch(OperationContext* txn);
+    /**
+     * Ensures there is an available entry in the batch map, and evicts a batch if necessary
+     */
+    void ensureFree(OperationContext* txn);
 
     /* Adds a batch to the LRU list. Checks if the cache needs to evict after
      * this operation, and does so if needed. */
@@ -217,29 +189,22 @@ private:
     /* Removes a batch from the LRU list. */
     void removeFromLRUList(batchIdType batchId);
 
-    /* Determines if adding something of this size needs an eviction */
-    bool needsEviction();
-
-    /* Drops a batch from the cache */
-    void dropFromCache(batchIdType batchId);
-
-    /* Adds to the cache, updates the LRU list, determines if eviction needed... */
-    void addToCache(OperationContext* txn, TimeSeriesBatch& batch);
-
-    /* Queue for LRU part of cache: least recently used is at the front, we add
-     * new elements to the back */
-    std::list<batchIdType> _lruList;
-
-private:
     /* Converts a date to the corresponding batch id number */
     batchIdType _getBatchId(const Date_t& time);
 
     /* Map of batch IDs to TSbatches */
     /* cache should own the batch so use emplace */
-    std::map<batchIdType, TimeSeriesBatch> _cache;
+    std::map<batchIdType, Batch> _cache;
+
+    /* Queue for LRU part of cache: least recently used is at the front, we add
+     * new elements to the back */
+    std::list<batchIdType> _lruList;
 
     // Namespace of underlying collection
     NamespaceString _nss;
+
+    bool _compressed;
+    stdx::mutex _lock;
 };
 
 }  // namespace mongo

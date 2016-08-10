@@ -31,6 +31,8 @@
 #include "mongo/db/views/view.h"
 
 #include "mongo/base/string_data.h"
+#include "mongo/db/timeseries/timeseries_monitor.h"
+#include "mongo/stdx/memory.h"
 
 namespace mongo {
 
@@ -38,13 +40,26 @@ ViewDefinition::ViewDefinition(StringData dbName,
                                StringData viewName,
                                StringData viewOnName,
                                const BSONObj& pipeline,
-                               bool timeseries)
-    : _viewNss(dbName, viewName), _viewOnNss(dbName, viewOnName), _timeseries(timeseries) {
+                               bool timeseries,
+                               bool timeseriesCompressed)
+    : _viewNss(dbName, viewName), _viewOnNss(dbName, viewOnName), _timeseries(timeseries), _timeseriesCompressed(timeseriesCompressed) {
     for (BSONElement e : pipeline) {
         _pipeline.push_back(e.Obj().getOwned());
     }
     if (timeseries) {
-        _tsCache.emplace(_viewOnNss);
+        _tsCache = stdx::make_unique<TimeSeriesCache>(_viewOnNss, timeseriesCompressed);
+        TimeSeriesCacheMonitor::get(getGlobalServiceContext()).registerView(_viewNss);
+    }
+}
+
+ViewDefinition::ViewDefinition(const ViewDefinition& other) {
+    _viewNss = other._viewNss;
+    _viewOnNss = other._viewOnNss;
+    _timeseries = other._timeseries;
+    _timeseriesCompressed = other._timeseriesCompressed;
+
+    if (_timeseries) {
+        _tsCache = stdx::make_unique<TimeSeriesCache>(_viewOnNss, _timeseriesCompressed);
     }
 }
 

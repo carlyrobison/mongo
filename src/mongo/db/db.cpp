@@ -104,6 +104,7 @@
 #include "mongo/db/storage/storage_engine.h"
 #include "mongo/db/storage/storage_options.h"
 #include "mongo/db/storage/wiredtiger/wiredtiger_customization_hooks.h"
+#include "mongo/db/timeseries/timeseries_monitor.h"
 #include "mongo/db/ttl.h"
 #include "mongo/db/wire_version.h"
 #include "mongo/executor/network_interface_factory.h"
@@ -718,6 +719,7 @@ static ExitCode _initAndListen(int listenPort) {
             } else {
                 startTTLBackgroundJob();
             }
+            TimeSeriesCacheMonitor::get(globalServiceContext).go();
         }
     }
 
