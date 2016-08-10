@@ -719,7 +719,7 @@ Status userCreateNS(OperationContext* txn,
         // Trying to get: {[{$unwind: "$_docs"}, {$replaceRoot: "$_docs"}]}
         BSONArrayBuilder arrBuilder;
         if (collectionOptions.compression) {
-
+            arrBuilder.append(BSON("$decompress" << "$_docs"));
         } else {
             arrBuilder.append(BSON("$unwind" << "$_docs"));
             arrBuilder.append(BSON("$replaceRoot" << BSON("newRoot" << "$_docs")));

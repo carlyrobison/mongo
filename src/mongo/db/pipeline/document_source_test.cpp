@@ -3820,97 +3820,70 @@ TEST_F(InvalidSortByCountSpec, NonFieldPathStringSpec) {
 }
 }  // namespace DocumentSourceSortByCount
 
-namespace DocumentSourceCount {
-using mongo::DocumentSourceCount;
-using mongo::DocumentSourceGroup;
-using mongo::DocumentSourceProject;
-using std::vector;
-using boost::intrusive_ptr;
+namespace DocumentSourceDecompress {
+using mongo::DocumentSourceDecompress;
+using mongo::DocumentSourceMock;
 
-class CountReturnsGroupAndProjectStages : public Mock::Base, public unittest::Test {
+class DecompressTester : public Mock::Base, public unittest::Test {
 public:
-    void testCreateFromBsonResult(BSONObj countSpec) {
-        vector<intrusive_ptr<DocumentSource>> result =
-            DocumentSourceCount::createFromBson(countSpec.firstElement(), ctx());
+    DecompressTester() : _mock(DocumentSourceMock::create()) {}
 
-        ASSERT_EQUALS(result.size(), 2UL);
-
-        const auto* groupStage = dynamic_cast<DocumentSourceGroup*>(result[0].get());
-        ASSERT(groupStage);
-
-        const auto* projectStage = dynamic_cast<DocumentSourceProject*>(result[1].get());
-        ASSERT(projectStage);
-
-        const bool explain = true;
-        vector<Value> explainedStages;
-        groupStage->serializeToArray(explainedStages, explain);
-        projectStage->serializeToArray(explainedStages, explain);
-        ASSERT_EQUALS(explainedStages.size(), 2UL);
-
-        StringData countName = countSpec.firstElement().valueStringData();
-        Value expectedGroupExplain =
-            Value{Document{{"_id", Document{{"$const", BSONNULL}}},
-                           {countName, Document{{"$sum", Document{{"$const", 1}}}}}}};
-        auto groupExplain = explainedStages[0];
-        ASSERT_VALUE_EQ(groupExplain["$group"], expectedGroupExplain);
-
-        Value expectedProjectExplain = Value{Document{{"_id", false}, {countName, true}}};
-        auto projectExplain = explainedStages[1];
-        ASSERT_VALUE_EQ(projectExplain["$project"], expectedProjectExplain);
+protected:
+    void createDecompress(const BSONObj& spec) {
+        _decomp = DocumentSourceDecompress::createFromBson(spec.firstElement(), ctx());
+        decompress()->setSource(_mock.get());
     }
+
+    DocumentSource* decompress() {
+        return _decomp.get();
+    }
+        // StringData countName = countSpec.firstElement().valueStringData();
+        // Value expectedGroupExplain =
+        //     Value{Document{{"_id", Document{{"$const", BSONNULL}}},
+        //                    {countName, Document{{"$sum", Document{{"$const", 1}}}}}}};
+        // auto groupExplain = explainedStages[0];
+        // ASSERT_VALUE_EQ(groupExplain["$group"], expectedGroupExplain);
+
+        // Value expectedProjectExplain = Value{Document{{"_id", false}, {countName, true}}};
+        // auto projectExplain = explainedStages[1];
+        // ASSERT_VALUE_EQ(projectExplain["$project"], expectedProjectExplain);
+
+    DocumentSourceMock* source() {
+        return _mock.get();
+    }
+
+    /**
+     * Assert that iterator state accessors consistently report the source is exhausted.
+     */
+    void assertExhausted() const {
+        ASSERT(!_decomp->getNext());
+        ASSERT(!_decomp->getNext());
+        ASSERT(!_decomp->getNext());
+    }
+
+private:
+    intrusive_ptr<DocumentSource> _decomp;
+    intrusive_ptr<DocumentSourceMock> _mock;
 };
 
-TEST_F(CountReturnsGroupAndProjectStages, ValidStringSpec) {
-    BSONObj spec = BSON("$count"
-                        << "myCount");
-    testCreateFromBsonResult(spec);
-
-    spec = BSON("$count"
-                << "quantity");
-    testCreateFromBsonResult(spec);
+TEST_F(DecompressTester, MakesDecompressStageWithFieldPath) {
+    createDecompress(BSON("$decompress" << "$_docs"));
 }
 
-class InvalidCountSpec : public Mock::Base, public unittest::Test {
-public:
-    vector<intrusive_ptr<DocumentSource>> createCount(BSONObj countSpec) {
-        auto specElem = countSpec.firstElement();
-        return DocumentSourceCount::createFromBson(specElem, ctx());
+
+TEST_F(DecompressTester, ActuallyDecompresses) {
+    createDecompress(BSON("$decompress" << "$a"));
+    Document input(fromjson("{_id: 1, a: BinData(0,'LQAAAHicU2RgYOCMz0xhqGJjAAOmssQcBhC7IsUoM5OBgRHIZAFiRiAAAIjdBQs=')}"));
+    source()->queue.push_back(input);
+
+    boost::optional<Document> next = decompress()->getNext();
+    while (next) {
+        log() << next->toString();
+        next = decompress()->getNext();
     }
-};
+    assertExhausted();
 
-TEST_F(InvalidCountSpec, NonStringSpec) {
-    BSONObj spec = BSON("$count" << 1);
-    ASSERT_THROWS_CODE(createCount(spec), UserException, 40156);
-
-    spec = BSON("$count" << BSON("field1"
-                                 << "test"));
-    ASSERT_THROWS_CODE(createCount(spec), UserException, 40156);
 }
-
-TEST_F(InvalidCountSpec, EmptyStringSpec) {
-    BSONObj spec = BSON("$count"
-                        << "");
-    ASSERT_THROWS_CODE(createCount(spec), UserException, 40157);
-}
-
-TEST_F(InvalidCountSpec, FieldPathSpec) {
-    BSONObj spec = BSON("$count"
-                        << "$x");
-    ASSERT_THROWS_CODE(createCount(spec), UserException, 40158);
-}
-
-TEST_F(InvalidCountSpec, EmbeddedNullByteSpec) {
-    BSONObj spec = BSON("$count"
-                        << "te\0st"_sd);
-    ASSERT_THROWS_CODE(createCount(spec), UserException, 40159);
-}
-
-TEST_F(InvalidCountSpec, PeriodInStringSpec) {
-    BSONObj spec = BSON("$count"
-                        << "test.string");
-    ASSERT_THROWS_CODE(createCount(spec), UserException, 40160);
-}
-}  // namespace DocumentSourceCount
 
 namespace DocumentSourceBucket {
 using mongo::DocumentSourceBucket;

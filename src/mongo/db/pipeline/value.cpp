@@ -274,6 +274,10 @@ Decimal128 Value::getDecimal() const {
     return _storage.getDecimal();
 }
 
+ConstDataRange Value::getBinData() const {
+    return ConstDataRange(_storage.getString().rawData(), _storage.getString().size());
+}
+
 double Value::getDouble() const {
     BSONType type = getType();
     if (type == NumberInt)
