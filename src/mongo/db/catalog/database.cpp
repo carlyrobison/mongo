@@ -706,28 +706,22 @@ Status userCreateNS(OperationContext* txn,
         db->createView(txn, ns, collectionOptions);
     } else {
         if (collectionOptions.timeseries) {
-            /**
-             * When working with a timeseries, we want the collection name that they specify to 
-             * be the view name, and we create a backing collection, which is just ".timeseries"
-             * appended to the desired name.
-             */
-            //log() << " Creating timeseries under namespace " << ns;
-
+            // When working with a timeseries, we want the collection name that they specify to 
+            // be the view name, and we create a backing collection, which is just "_timeseries"
+            // appended to the desired name.
             NamespaceString nss(ns);
-            std::string viewName = nss.coll().toString(); // the desired name
+            std::string viewName = nss.coll().toString();
             std::string dbName = nss.db().toString();
 
             // Create the backing collection
-            std::string backingViewName = viewName + "_" + "timeseries";
-            std::string backingNS = NamespaceString(dbName, backingViewName).ns();
-            uassert(ErrorCodes::NamespaceExists, "TS name conflicts with existing collection " + backingViewName,
+            std::string backingCollName = viewName + "_" + "timeseries";
+            std::string backingNS = NamespaceString(dbName, backingCollName).ns();
+            uassert(ErrorCodes::NamespaceExists, "TS name conflicts with existing collection " + backingCollName,
                 db->getCollection(backingNS) == NULL);
             invariant(db->createCollection(txn, StringData(backingNS), collectionOptions, createDefaultIndexes));
             
-
-            // Construct the pipeline
+            // Construct the pipeline to "undo" the batching done by timeseries.
             BSONArrayBuilder arrBuilder;
-            // Trying to get: {[{$unwind: "_$docs"}]}
             if (collectionOptions.compressed) {
                 arrBuilder.append(BSON("$decompress" << "$_docs"));
             } else {
@@ -737,18 +731,16 @@ Status userCreateNS(OperationContext* txn,
             
             BSONObj pipeline = arrBuilder.obj();
 
-            // Create the timeseries view
-            log() << "TIMESERIES: userCreateNS attempting to create " 
-                   << viewName << " with data in " << backingViewName << " with pipeline " 
+            // Create the timeseries view itself
+            LOG(3) << "TIMESERIES: userCreateNS attempting to create " 
+                   << viewName << " with data in " << backingCollName << " with pipeline " 
                    << pipeline;
-
-            // when merging, make sure this matches the above command for regular views
-            collectionOptions.viewNamespace = backingViewName;
+            collectionOptions.viewNamespace = backingCollName;
             collectionOptions.pipeline = pipeline;
             db->createView(txn, ns, collectionOptions);
 
         } else { // actually just a regular collection
-            LOG(3) << "JK: userCreateNS detecting an ordinary create collection command";
+            LOG(3) << "userCreateNS detecting an ordinary create collection command";
             invariant(db->createCollection(txn, ns, collectionOptions, createDefaultIndexes));
         }
     }

@@ -279,12 +279,6 @@ public:
         return static_cast<const RCDBRef*>(genericRCPtr);
     }
 
-    // ConstDataRange getBinData() const {
-    //     dassert(typeid(*genericRCPtr) == typeid(const RCString));
-    //     return ConstDataRange(genericRCPtr->)
-    //     return static_cast<const RCString*>(genericRCPtr);
-    // }
-
     Decimal128 getDecimal() const {
         dassert(typeid(*genericRCPtr) == typeid(const RCDecimal));
         const RCDecimal* decPtr = static_cast<const RCDecimal*>(genericRCPtr);

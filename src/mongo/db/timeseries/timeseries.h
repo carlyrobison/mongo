@@ -107,11 +107,6 @@ public:
     /* Saves a specific batch to a collection */
     bool save(OperationContext* txn, const NamespaceString& nss);
 
-    /* Assuming this is the deconstructor. Saves the contents of the buffer
-     * (on disk?) and disappears */
-    // ~TimeSeriesBatch();
-
-
 private:
     batchIdType _batchId;
 
@@ -130,7 +125,7 @@ public:
     TimeSeriesCompressor(batchIdType batchId);
 
     /**
-     * Constructs a batch object from the retrieved bson document.
+     * Constructs a compressor object from the retrieved bson document.
      */
     TimeSeriesCompressor(const BSONObj& batchDocument);
 
@@ -138,18 +133,16 @@ public:
 
     std::string toString(bool includeTime = false) const;
 
-    /**
-     * Inserts a document into the time series DB.
-     */
+    // Inserts a document into the time series DB compressor.
     void insert(const BSONObj& doc);
 
-    /* Retrieves the single BSONObj for the batch document. */
+    // Retrieves the single BSONObj of the compressed data.
     BSONObj retrieveBatch();
 
-    /* Reports this batch's batch Id */
+    // Reports this batch's batch Id
     batchIdType _thisBatchId();
 
-    /* Saves a specific batch to a collection */
+    // Saves this batch to the backing collection
     bool save(OperationContext* txn, const NamespaceString& nss);
 
 private:
@@ -175,7 +168,7 @@ public:
      * Creates the batch if necessary. */
     void insert(OperationContext* txn, const BSONObj& doc, BSONObjBuilder* replyBuilder, bool persistent = false);
 
-    /* Loads a batch into the cache and the cache list */
+    /* Retrieves a batch from the backing collection. */
     BSONObj findBatch(OperationContext* txn, batchIdType batchId);
 
     /* Updates LRU list */
@@ -214,7 +207,7 @@ private:
     /* Converts a date to the corresponding batch id number */
     batchIdType _getBatchId(const Date_t& time);
 
-    /* Map of batch IDs to TSbatches */
+    /* Map of batch IDs to TSbatches and compressors */
     /* cache should own the batch so use emplace */
     std::map<batchIdType, TimeSeriesBatch> _cache;
     std::map<batchIdType, TimeSeriesCompressor> _compressedCache;

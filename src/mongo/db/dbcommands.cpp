@@ -108,7 +108,6 @@
 #include "mongo/util/md5.hpp"
 #include "mongo/util/print.h"
 #include "mongo/util/scopeguard.h"
-//#include "mongo/db/timeseries/timeseries.h"
 
 namespace mongo {
 
@@ -1557,56 +1556,35 @@ bool Command::run(OperationContext* txn,
 
       // Should have a real DB if we are doing any of these operations
       AutoGetDb ctx(txn, db, MODE_IX);
-      //log() << "AutoGot DB";
       Database* actualDb = ctx.getDb();
-      //log() << "Got DB pointer";
-      
       if(actualDb) {
-
         auto viewCatalog = actualDb->getViewCatalog();
-        //log() << "Survived getting the view catalog ";
-
         if (viewCatalog && viewCatalog->lookup(StringData(nss.ns()))) {
-            //log() << "It's a view, trying to modify";
             auto view = viewCatalog->lookup(StringData(nss.ns()));
-            //log() << "got view " << view->toString();
             if (view->isWritable()) {
-                //log() << cmd << " view is writable";
-                // log() << view->toString();
-                // Detect a time series view.
                 if (cmd.hasField("insert") && (view->isTimeSeries())) {
-                    // log() << "Detected time series view insert attempt";
-                    // log() << cmd.getField("documents");
-
-                    // Setup for inserting saved documents
+                    // Detected a time series view insert attempt.
 
                     // Insert the documents into the in-memory data buffer
                     // Do each document in series
                     for (auto doc : cmd.getField("documents").Obj()) {
                         BSONObj obj = doc.Obj();
-                        LOG(2) << "Inserting " << obj;
+                        LOG(3) << "TIMESERIES INSERT: " << obj;
 
                         uassert(ErrorCodes::UnsupportedFormat, "_id field required on insert to timeseries.",
                             obj.hasField("_id"));
+                        // attempt to coerce the _id field to a date.
                         if (obj.getField("_id").type() != mongo::Date) {
-                          log() << "_ID IS NOT A DATE!!!" << " obj is: " << obj;
                           if (obj.getField("_id").type() == mongo::NumberLong) {
-                            log() << "_ID is a long";
                             long long num = obj.getField("_id").Long();
                             BSONObj newobj = obj.replaceFieldNames(BSON("_id" << Date_t::fromMillisSinceEpoch(num)));
                             newobj.getOwned();
-                            log() << " obj now: " << newobj;
-                            if (newobj.getField("_id").type() == mongo::Date) {
-                              log() << "_ID IS now a date!!!"; 
-                            }
-                          } else if (obj.getField("_id").type() == mongo::NumberInt) {
-                            log() << "_ID is an int!!!";
                           }
                         }
                         uassert(ErrorCodes::UnsupportedFormat, "_id field must contain a Date type for timeseries.",
                             obj.getField("_id").type() == mongo::Date);
 
-                        // create the object
+                        // create the document to pass to the Timeseries collection.
                         BSONObjBuilder builder;
                         for (BSONElement field : obj) {
                             const StringData fieldName = field.fieldNameStringData();
@@ -1616,51 +1594,9 @@ bool Command::run(OperationContext* txn,
                                 builder.append(field);
                             }
                         }
-                        BSONObj docToInsert = builder.obj();
-                        // log() << "constructed " << docToInsert;
-
-                        // insert to timeseries returns boost::optional<BSONArray> 
 
                         // insert the object into the in-memory data store
-                        view->getTSCache()->insert(txn, docToInsert, &inPlaceReplyBob);
-                        // log() << "Insert of " << docToInsert << " completed.";
-
-                        // Get batch to save to the backing collection
-                        // BSONObj toSave = view->getTSCache()->retrieveBatch(docToInsert.getField("_id").Date());
-                        // // log() << "saving" << toSave;
-
-                        // // Attempt to upsert
-                        // // Fake a new upsert command
-                        // BSONObjBuilder cmdBuilder;
-                        // cmdBuilder.append("update", view->viewOn());
-
-                        // BSONObjBuilder updateObj;
-
-                        // // Create query
-                        // BSONObjBuilder query;
-                        // query.append("_id", toSave.getField("_id").Long());
-                        // updateObj.append("q", query.obj());
-                        // // Add the other parts
-                        // updateObj.append("u", toSave);
-                        // updateObj.append("multi", false);
-                        // updateObj.append("upsert", true);
-
-                        // BSONArrayBuilder updateArray;
-                        // updateArray.append(updateObj.obj());
-                        // cmdBuilder.append("updates", updateArray.arr());
-                        // cmdBuilder.append("ordered", true);
-
-                        // BSONObj newCmd = cmdBuilder.obj();
-                        // log() << newCmd;
-
-                        // Create an update command.
-                        /// Command *update = Command::findCommand("update");
-                        //log() << update->getName();
-                        // bool result = update->run(txn, db, newCmd, 0, errmsg, inPlaceReplyBob);
-                        /// update->run(txn, db, newCmd, 0, errmsg, inPlaceReplyBob);
-                        //log() << "survived saving to collection, with result " << result;
-
-                        //log() << "HOORAY WE UPSERTED";
+                        view->getTSCache()->insert(txn, builder.obj(), &inPlaceReplyBob);
                     }
 
                     // deal with this Bob character

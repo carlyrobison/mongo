@@ -313,6 +313,10 @@ BSONObj CollectionOptions::toBSON() const {
         b.append("timeseries", true);
     }
 
+    if (timeseries) {
+        b.append("compressed", true);
+    }
+
     return b.obj();
 }
 }

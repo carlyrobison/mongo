@@ -1,3 +1,5 @@
+// Testing whether a view can use a secondary index. The answer is no.
+
 conn = new Mongo();
 db = conn.getDB("viewstest");
 

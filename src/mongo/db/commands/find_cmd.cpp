@@ -283,61 +283,15 @@ public:
         Collection* collection = ctx.getCollection();
         // Check if this query is being performed on a view.
         if (auto view = ctx.getView()) {
+            ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
+            if (!viewShardingCheck.canRunOnMongod()) {
+                viewShardingCheck.appendResolvedView(result);
 
-            // Check if this is a time series
-            // log() << cmdObj;
-            // if (view->isTimeSeries()) {
-            //     // log() << "Detected time series view find request";
-
-            //     // Extract the _id value, and find with that.
-            //     BSONObj findQuery = cmdObj.getField("filter").Obj();
-            //     // log() << findQuery;
-
-            //     // This is wrong when we just want to find() all of the timeseries data.
-            //     // Unless we don't want to support that.
-            //     // Actually this will be obsolete when we work with a collection.
-
-            //     uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by _id.",
-            //         findQuery.hasField("_id"));
-            //     uassert(ErrorCodes::UnsupportedFormat, "Must retrieve time series by a date.",
-            //         findQuery.getField("_id").type() == mongo::Date);
-
-            //     //log() << "Searching for time " << findQuery.getField("_id").Date();
-                
-            //     BSONObj obj = view->getTSManager()->retrieve(findQuery.getField("_id").Date());
-
-
-                // // return the object
-                // //log() << "Retrieved " << obj;
-                // //log() << "Search completed. ";
-
-                // *
-                //  * Collection world:
-                //  * If the find command has a timestamp _id, then we add a $match on the batch
-                //  * id to the beginning of the aggregation pipeline. (unsure how to implement)
-                //  * Otherwise we just let views do its thing.
-                 
-
-                // // Generate the response object to send to the client.
-                // CursorResponseBuilder firstBatch(true, &result);
-                // firstBatch.append(obj);
-                // CursorId cursorId = 0;
-                // firstBatch.done(cursorId, nss.ns());
-                // return true;
-
-            //} else {
-            //log() << view->pipeline();
-
-                ViewShardingCheck viewShardingCheck(txn, ctx.getDb(), view);
-                if (!viewShardingCheck.canRunOnMongod()) {
-                    viewShardingCheck.appendResolvedView(result);
-
-                    return appendCommandStatus(
-                        result,
-                        {ErrorCodes::ViewMustRunOnMongos,
-                         str::stream() << "Command on view must be executed by mongos"});
-                }
-            //}
+                return appendCommandStatus(
+                    result,
+                    {ErrorCodes::ViewMustRunOnMongos,
+                     str::stream() << "Command on view must be executed by mongos"});
+            }
 
             ctx.unlock();
             auto& qr = cq->getQueryRequest();

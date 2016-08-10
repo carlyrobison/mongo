@@ -1,4 +1,4 @@
-// Insert many documents into a 
+// Insert many documents into a timeseries collection, see how long it takes.
 
 load("src/mongo/db/timeseries/utils.js");
 

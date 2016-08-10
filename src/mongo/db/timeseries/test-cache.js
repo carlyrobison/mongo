@@ -1,14 +1,13 @@
+// This test assesses the cache eviction policy.
+
 conn = new Mongo();
-db = conn.getDB("timeseriesview"); // can now randomly generate this
+db = conn.getDB("timeseriesview");
 
 // Drop the old database, this will also drop old views
 db.dropDatabase();
 
-// Insert new data
-// db.data.insert([{}]);
-
-// Create the view
-// view can now have any name, except ones that <existing collection>_timeseries
+// Create the timeseries collection
+// New TS collection can now have any name, except ones that are <existing collection>_timeseries
 db.runCommand({"create": "tsv", "timeseries": "true"});
 
 // Insert some dates
@@ -25,17 +24,10 @@ db.tsv.insert({"_id": new Date(6902), "val": "c0cx6"});
 db.tsv.find({"_id": new Date(2118)});
 db.tsv.find({"_id": new Date(9655)});
 db.tsv.find({"_id": new Date(915)});
-db.tsv.find({"_id": new Date(5098)});
-db.tsv.find({"_id": new Date(6902)});
 db.tsv.find({"_id": new Date(2975)});
 db.tsv.find({"_id": new Date(2420)});
 db.tsv.find({"_id": new Date(526)});
 
-// Try to extract some that don't exist
-//db.tsv.find({"_id": new Date(6014)});
-
-// Try to insert/extract some with invalid types
-//db.tsv.insert({"_id": 6058, "val": 6610});
-//db.tsv.find({"_id": 6058});
-
-//console.log(db.tsv.find({}));
+// Should not have been flushed yet.
+db.tsv.find({"_id": new Date(5098)});
+db.tsv.find({"_id": new Date(6902)});
