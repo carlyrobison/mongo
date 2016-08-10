@@ -155,6 +155,7 @@ public:
     bool getBool() const;
     long long getDate() const;  // in milliseconds
     Timestamp getTimestamp() const;
+    ConstDataRange getBinData() const;
     const char* getRegex() const;
     const char* getRegexFlags() const;
     std::string getSymbol() const;

@@ -178,6 +178,15 @@ TimeSeriesCompressor::TimeSeriesCompressor(const BSONObj& batchDocument) {
 
     // Just make an empty batch.
 
+    // 1. Decompress the batch.
+    // Value compressedData = document.getNestedField(_decompressPath);
+    // log() << "compressed data: " << compressedData;
+
+    // ConstDataRange buf = compressedData.getBinData();
+    // auto swBuf = FTDCDecompressor().uncompress(buf);
+    // uassert(40197, swBuf.getStatus().reason(), swBuf.isOK());
+    // auto _docsToReturn = swBuf.getValue();
+
     // Create the batch Id from the batch document
     _batchId = batchDoc["_id"].numberLong();
 

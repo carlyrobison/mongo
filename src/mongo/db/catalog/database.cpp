@@ -729,7 +729,7 @@ Status userCreateNS(OperationContext* txn,
             // Trying to get: {[{$unwind: "_$docs"}]}
             BSONArrayBuilder arrBuilder;
             BSONObjBuilder objBuilder;
-            arrBuilder.append(objBuilder.append("$unwind", "$_docs").obj());
+            arrBuilder.append(objBuilder.append("$decompress", "$_docs").obj());
 
             // Add the transform stage later
             // BSONObjBuilder objBuilder2;

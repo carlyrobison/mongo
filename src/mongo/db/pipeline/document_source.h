@@ -1796,4 +1796,32 @@ private:
     bool _latencySpecified = false;
     bool _finished = false;
 };
+
+class DocumentSourceDecompress final : public DocumentSource {
+public:
+    // virtuals from DocumentSource
+    boost::optional<Document> getNext() final;
+    const char* getSourceName() const final;
+    Value serialize(bool explain = false) const final;
+
+    GetDepsReturn getDependencies(DepsTracker* deps) const final;
+
+    /**
+     * Creates a new $decompress DocumentSource from a BSON specification.
+     */
+    static boost::intrusive_ptr<DocumentSource> createFromBson(
+        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+
+private:
+    DocumentSourceDecompress(const boost::intrusive_ptr<ExpressionContext>& expCtx,
+                         const FieldPath& fieldPath);
+
+    // Configuration state.
+    const FieldPath _decompressPath;
+
+    // Iteration state.
+    class Decompressor;
+    std::unique_ptr<Decompressor> _decompressor;
+};
+
 }  // namespace mongo
