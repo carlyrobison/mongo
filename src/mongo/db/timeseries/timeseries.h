@@ -102,6 +102,11 @@ private:
         Batch(const BSONObj& batchDocument, bool compressed);
 
         /**
+         * Prints a string. For debugging.
+         */
+        std::string toString() const;
+
+        /**
          * Inserts a document into the time series DB.
          * Assume that the document's ID is a time.
          */

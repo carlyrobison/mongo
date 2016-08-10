@@ -93,6 +93,13 @@ TimeSeriesCache::Batch::Batch(BatchIdType batchId, bool compressed)
     }
 }
 
+std::string TimeSeriesCache::Batch::toString() const {
+    StringBuilder s;
+    s << ("Batch number: ");
+    s << (_batchId);
+    return s.str();
+}
+
 void TimeSeriesCache::Batch::insert(const BSONObj& doc) {
     BSONObj newDoc = doc.getOwned();  // internally copies if necessary
     // Adds this document to the map of documents, based on date.
@@ -120,6 +127,8 @@ void TimeSeriesCache::Batch::insert(const BSONObj& doc) {
 void TimeSeriesCache::Batch::update(const BSONObj& doc) {
     BSONObj newDoc = doc.getOwned();  // Internally copies if necessary.
     Date_t date = newDoc.getField("_id").Date();
+    massert(ErrorCodes::NoSuchKey, "Cannot update a document that doesn't exist.",
+        _docs.find(date) != _docs.end());
     _docs[date] = newDoc;
 }
 
