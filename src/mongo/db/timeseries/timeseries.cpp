@@ -265,7 +265,7 @@ bool TimeSeriesCompressor::save(OperationContext* txn, const NamespaceString& ns
 }
 
 TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss, bool compressed) {
-    log() << "NamespaceString: " << nss.ns();
+    log() << "NamespaceString: " << nss.ns() << " is compressed " << (compressed ? "y" : "n");
     _nss = nss;
     _compressed = compressed;
 }
@@ -289,6 +289,43 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, BSONObjB
 	Date_t date = doc.getField("_id").Date();
     batchIdType batchId = _getBatchId(date);
 
+    if (_compressed) {
+        // Check if the batch exists in the cache. If it doesn't, try to find it. If it does, use the existing one.
+        if (_compressedCache.find(batchId) == _compressedCache.end()) {
+            log() << "Batch not in the cache";
+            // Batch does not exist in the cache. Try to load it from the underlying collection.
+            auto loadedBatch = findBatch(txn, batchId);
+
+            log() << "Loaded the batch: " << loadedBatch;
+
+            if (!loadedBatch.isEmpty()) {
+                log() << "Nonempty batch";
+                TimeSeriesCompressor newBatch(loadedBatch.getOwned());
+                //TimeSeriesCompressor newBatch(loadedBatch);
+
+                addToCache(txn, newBatch);
+                massert(40194, "Loaded batch must be what we got from collection", newBatch.retrieveBatch() == loadedBatch);
+            } else {
+                log() << "Batch not in collection, making a new one";
+                //Sparkling new time batch
+                TimeSeriesCompressor newBatch(batchId);
+                log() << "New batch created";
+                addToCache(txn, newBatch);
+                log() << "Done adding to cache";
+            }
+        } else { // Simply add it to the LRU cache
+            log() << "Batch already in cache";
+            addToLRUList(batchId);
+        }
+        _compressedCache[batchId].insert(doc);
+        replyBuilder->append("n", 1);
+
+        if (persistent) {
+            _compressedCache[batchId].save(txn, _nss);
+        }
+        return;
+    }
+
     // Check if the batch exists in the cache. If it doesn't, try to find it. If it does, use the existing one.
     if (_cache.find(batchId) == _cache.end()) {
         log() << "Batch not in the cache";
@@ -299,15 +336,14 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, BSONObjB
 
         if (!loadedBatch.isEmpty()) {
             log() << "Nonempty batch";
-            TimeSeriesCompressor newBatch(loadedBatch.getOwned());
-            //TimeSeriesCompressor newBatch(loadedBatch);
+            TimeSeriesBatch newBatch(loadedBatch.getOwned());
 
             addToCache(txn, newBatch);
-            massert(40194, "Loaded batch must be what we got from collection", newBatch.retrieveBatch() == loadedBatch);
+            massert(40233, "Loaded batch must be what we got from collection", newBatch.retrieveBatch() == loadedBatch);
         } else {
             log() << "Batch not in collection, making a new one";
             //Sparkling new time batch
-            TimeSeriesCompressor newBatch(batchId);
+            TimeSeriesBatch newBatch(batchId);
             log() << "New batch created";
             addToCache(txn, newBatch);
             log() << "Done adding to cache";
@@ -316,9 +352,6 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, BSONObjB
         log() << "Batch already in cache";
         addToLRUList(batchId);
     }
-
-    massert(40193, "TimeSeriesCache::insert | Still no batch to insert into", _cache.find(batchId) != _cache.end());
-
     _cache[batchId].insert(doc);
     replyBuilder->append("n", 1);
 
@@ -326,12 +359,15 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc, BSONObjB
         _cache[batchId].save(txn, _nss);
     }
 
+    massert(40193, "TimeSeriesCache::insert | Still no batch to insert into", _cache.find(batchId) != _cache.end());
+
+
 }
 
 BSONObj TimeSeriesCache::findBatch(OperationContext* txn, batchIdType batchId) {
     // Check that the batch id doesn't already exist in memory.
-    massert(40189, "Cannot find a batch that already exists in the cache.",
-        _cache.find(batchId) == _cache.end());
+    // massert(40189, "Cannot find a batch that already exists in the cache.",
+    //    _cache.find(batchId) == _cache.end());
 
     //log() << "Finding batch. <Mario voice> Here we go!";
     BSONObjBuilder query;
@@ -353,14 +389,18 @@ BSONObj TimeSeriesCache::retrieveBatch(const Date_t& time) {
     batchIdType batchId = _getBatchId(time);
 
 	// Assert that the batch exists.
-    uassert(BATCH_NONEXISTENT, "Cannot retrieve a batch that doesn't exist.",
-    	_cache.find(batchId) != _cache.end());
-
-    TimeSeriesCompressor& batch = _cache[batchId];
+    // uassert(BATCH_NONEXISTENT, "Cannot retrieve a batch that doesn't exist.",
+    // 	_cache.find(batchId) != _cache.end());
 
     addToLRUList(batchId);
 
-    return batch.retrieveBatch();
+    if (_compressed) {
+        TimeSeriesCompressor& batch = _compressedCache[batchId];   
+        return batch.retrieveBatch(); 
+    } else {
+        TimeSeriesBatch& batch = _cache[batchId];   
+        return batch.retrieveBatch(); 
+    }
 }
 
 batchIdType TimeSeriesCache::evictBatch(OperationContext* txn) {
@@ -370,11 +410,14 @@ batchIdType TimeSeriesCache::evictBatch(OperationContext* txn) {
 
     /* Save the batch to the underlying collection */
     batchIdType toEvict = _lruList.front();
-    //log() << "namespace: " << _nss.ns() << " evicting: " << toEvict;
-    _cache[toEvict].save(txn, _nss);
 
-    //log() << "Save OK";
-    _cache.erase(toEvict);
+    if (_compressed) {
+        _compressedCache[toEvict].save(txn, _nss);
+        _compressedCache.erase(toEvict);
+    } else {
+        _cache[toEvict].save(txn, _nss);
+        _cache.erase(toEvict);
+    }
     //log() << "Erased from cache too";
     _lruList.pop_front();
 
@@ -402,10 +445,14 @@ bool TimeSeriesCache::needsEviction() {
 
 void TimeSeriesCache::dropFromCache(batchIdType batchId) {
     /* Assert that the batch exists in the cache */
-    massert(40191, "Batch must exist in the cache", _cache.find(batchId) != _cache.end());
+    //massert(40191, "Batch must exist in the cache", _cache.find(batchId) != _cache.end());
 
     /* Drop the batch from the cache */
-    _cache.erase(batchId);
+    if (_compressed) {
+        _compressedCache.erase(batchId);
+    } else {
+        _cache.erase(batchId);
+    }
 
     /* Remove the batch from the LRU list */
     removeFromLRUList(batchId);
@@ -415,7 +462,25 @@ void TimeSeriesCache::dropFromCache(batchIdType batchId) {
 void TimeSeriesCache::addToCache(OperationContext* txn, TimeSeriesCompressor& batch) {
     batchIdType batchId = batch._thisBatchId();
 
-    massert(40192, "Batch is already in the cache", _cache.find(batchId) == _cache.end());
+    massert(40234, "Batch is already in the cache", _compressedCache.find(batchId) == _compressedCache.end());
+
+    if (needsEviction()) { // make space in the cache
+        LOG(2) << "Eviction required";
+        LOG(2) << "Evicted batch: " << evictBatch(txn);
+        evictBatch(txn);
+    }
+
+    _compressedCache.emplace(batchId, batch); // add the batch to the cache
+    addToLRUList(batchId);
+
+    LOG(2) << "Added batch number: " << batchId << " to the cache";
+}
+
+/* Adds to the cache, updates the LRU list, determines if eviction needed... */
+void TimeSeriesCache::addToCache(OperationContext* txn, TimeSeriesBatch& batch) {
+    batchIdType batchId = batch._thisBatchId();
+
+    massert(40235, "Batch is already in the cache", _cache.find(batchId) == _cache.end());
 
     if (needsEviction()) { // make space in the cache
         LOG(2) << "Eviction required";

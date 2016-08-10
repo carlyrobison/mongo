@@ -204,6 +204,7 @@ private:
 
     /* Adds to the cache, updates the LRU list, determines if eviction needed... */
     void addToCache(OperationContext* txn, TimeSeriesCompressor& batch);
+    void addToCache(OperationContext* txn, TimeSeriesBatch& batch);
 
     /* Queue for LRU part of cache: least recently used is at the front, we add
      * new elements to the back */
@@ -215,8 +216,8 @@ private:
 
     /* Map of batch IDs to TSbatches */
     /* cache should own the batch so use emplace */
-    std::map<batchIdType, TimeSeriesCompressor> _cache;
-    //std::map<batchIdType, TimeSeriesCompressor> _compressedCache;
+    std::map<batchIdType, TimeSeriesBatch> _cache;
+    std::map<batchIdType, TimeSeriesCompressor> _compressedCache;
     bool _compressed;
 
     // Namespace of underlying collection
