@@ -79,12 +79,12 @@ ViewCatalog::ViewCatalog(OperationContext* txn, Database* database) : _db(databa
         // of future format upgrades.
         for (const BSONElement& e : viewDef) {
             std::string name(e.fieldName());
-            fassert(40186, name == "_id" || name == "viewOn" || name == "pipeline");
+            fassert(40186, name == "_id" || name == "viewOn" || name == "pipeline" || name == "timeseries" || name == "compressed");
         }
         NamespaceString viewName(viewDef["_id"].str());
         fassert(40187, viewName.db() == database->name());
         _viewMap[viewDef["_id"].str()] = std::make_shared<ViewDefinition>(
-            viewName.db(), viewName.coll(), viewDef["viewOn"].str(), viewDef["pipeline"].Obj());
+            viewName.db(), viewName.coll(), viewDef["viewOn"].str(), viewDef["pipeline"].Obj(), viewDef["timeseries"].trueValue(), viewDef["compressed"].trueValue());
     }
 }
 
@@ -92,23 +92,24 @@ Status ViewCatalog::createView(OperationContext* txn,
                                const NamespaceString& viewName,
                                const std::string& viewOn,
                                const BSONObj& pipeline,
-                               bool timeseries) {
+                               bool timeseries,
+                               bool compressed) {
     uassert(40188, "View support not enabled", enableViews);
     NamespaceString viewNss(viewName.db(), viewOn);
     if (lookup(StringData(viewName.ns()))) {
         LOG(3) << "VIEWS: Attempted to create a duplicate view";
         return Status(ErrorCodes::NamespaceExists, "Namespace already exists");
     }
-    BSONObj viewDef = BSON("_id" << viewName.ns() << "viewOn" << viewOn << "pipeline" << pipeline);
+    BSONObj viewDef = BSON("_id" << viewName.ns() << "viewOn" << viewOn << "pipeline" << pipeline << "timeseries" << timeseries << "compressed" << compressed);
     Collection* systemViews = _db->getOrCreateCollection(txn, _db->getSystemViewsName());
     OpDebug* opDebug = nullptr;
     bool enforceQuota = false;
     systemViews->insertDocument(txn, viewDef, opDebug, enforceQuota);
 
     BSONObj ownedPipeline = pipeline.getOwned();
-    txn->recoveryUnit()->onCommit([this, viewName, viewOn, ownedPipeline, timeseries]() {
+    txn->recoveryUnit()->onCommit([this, viewName, viewOn, ownedPipeline, timeseries, compressed]() {
         _viewMap[viewName.ns()] =
-            std::make_shared<ViewDefinition>(viewName.db(), viewName.coll(), viewOn, ownedPipeline, timeseries);
+            std::make_shared<ViewDefinition>(viewName.db(), viewName.coll(), viewOn, ownedPipeline, timeseries, compressed);
     });
     return Status::OK();
 }

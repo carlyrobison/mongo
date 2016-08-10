@@ -165,7 +165,7 @@ private:
 class TimeSeriesCache {
 public:
 
-    TimeSeriesCache(const NamespaceString& nss);
+    TimeSeriesCache(const NamespaceString& nss, bool compressed);
 
     //TimeSeriesCache() {};
 
@@ -216,6 +216,8 @@ private:
     /* Map of batch IDs to TSbatches */
     /* cache should own the batch so use emplace */
     std::map<batchIdType, TimeSeriesCompressor> _cache;
+    //std::map<batchIdType, TimeSeriesCompressor> _compressedCache;
+    bool _compressed;
 
     // Namespace of underlying collection
     NamespaceString _nss;

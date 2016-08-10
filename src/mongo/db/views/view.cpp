@@ -49,14 +49,15 @@ ViewDefinition::ViewDefinition(StringData dbName,
                                StringData viewName,
                                StringData viewOn,
                                const BSONObj& pipeline,
-                               bool timeseries)
+                               bool timeseries,
+                               bool compressed)
     : _dbName(dbName.toString()),
       _viewName(viewName.toString()),
       _backingViewName(viewOn.toString()),
       _timeseries(timeseries)
     {
     if (timeseries) {
-        tsCache = new TimeSeriesCache(NamespaceString(dbName, viewOn));
+        tsCache = new TimeSeriesCache(NamespaceString(dbName, viewOn), compressed);
     }
     for (BSONElement e : pipeline) {
         _pipeline.push_back(e.Obj().getOwned());

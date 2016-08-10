@@ -534,7 +534,7 @@ void Database::createView(OperationContext* txn, StringData ns, const Collection
 
     LOG(3) << "VIEWS: userCreateNS attempting to create " << ns << " as a view on "
            << options.viewNamespace << " with pipeline " << options.pipeline;
-    uassertStatusOK(_views->createView(txn, nss, options.viewNamespace, options.pipeline, options.timeseries));
+    uassertStatusOK(_views->createView(txn, nss, options.viewNamespace, options.pipeline, options.timeseries, options.compressed));
 }
 
 
@@ -726,18 +726,19 @@ Status userCreateNS(OperationContext* txn,
             
 
             // Construct the pipeline
-            // Trying to get: {[{$unwind: "_$docs"}]}
             BSONArrayBuilder arrBuilder;
-            BSONObjBuilder objBuilder;
-            arrBuilder.append(objBuilder.append("$decompress", "$_docs").obj());
-
-            // Add the transform stage later
-            // BSONObjBuilder objBuilder2;
-            // arrBuilder.append(objBuilder2.append("$transform", "$_docs").obj());
+            // Trying to get: {[{$unwind: "_$docs"}]}
+            if (collectionOptions.compressed) {
+                arrBuilder.append(BSON("$decompress" << "$_docs"));
+            } else {
+                arrBuilder.append(BSON("$unwind" << "$_docs"));
+                arrBuilder.append(BSON("$replaceRoot" << BSON("newRoot" << "$_docs")));
+            }
+            
             BSONObj pipeline = arrBuilder.obj();
 
             // Create the timeseries view
-            LOG(3) << "TIMESERIES: userCreateNS attempting to create " 
+            log() << "TIMESERIES: userCreateNS attempting to create " 
                    << viewName << " with data in " << backingViewName << " with pipeline " 
                    << pipeline;
 

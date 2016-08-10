@@ -122,5 +122,6 @@ struct CollectionOptions {
 
     // True if this collection is a timeseries one.
     bool timeseries;
+    bool compressed;
 };
 }

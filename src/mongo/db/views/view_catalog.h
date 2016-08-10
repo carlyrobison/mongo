@@ -72,7 +72,8 @@ public:
                       const NamespaceString& viewName,
                       const std::string& viewOn,
                       const BSONObj& pipeline,
-                      bool timeseries = false);
+                      bool timeseries,
+                      bool compressed);
 
     /**
      * Drop a view.

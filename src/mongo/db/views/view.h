@@ -49,7 +49,8 @@ public:
                    StringData viewName,
                    StringData viewOn,
                    const BSONObj& pipeline,
-                   bool timeseries = false);
+                   bool timeseries,
+                   bool compressed);
 
     void operator=(const ViewDefinition& other) {
         _dbName = other._dbName;

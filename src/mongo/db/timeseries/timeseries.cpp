@@ -264,9 +264,10 @@ bool TimeSeriesCompressor::save(OperationContext* txn, const NamespaceString& ns
     return true;
 }
 
-TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss) {
+TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss, bool compressed) {
     log() << "NamespaceString: " << nss.ns();
     _nss = nss;
+    _compressed = compressed;
 }
 
 std::string TimeSeriesCache::toString(bool printBatches) const {

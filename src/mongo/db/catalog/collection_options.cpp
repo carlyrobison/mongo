@@ -109,6 +109,7 @@ void CollectionOptions::reset() {
     viewNamespace = "";
     pipeline = BSONObj();  // TODO: Empty document or empty array?
     timeseries = false;
+    compressed = false;
 }
 
 bool CollectionOptions::isValid() const {
@@ -241,6 +242,8 @@ Status CollectionOptions::parse(const BSONObj& options) {
             pipeline = e.Obj().getOwned();
         } else if (fieldName == "timeseries") {
             timeseries = e.trueValue();
+        } else if (fieldName == "compressed") {
+            compressed = e.trueValue();
         }
     }
     uassert(ErrorCodes::InvalidOptions,
