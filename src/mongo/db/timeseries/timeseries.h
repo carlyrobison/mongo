@@ -176,7 +176,7 @@ public:
     void insert(OperationContext* txn, const BSONObj& doc, bool persistent = false);
 
     /* Loads a batch into the cache and the cache list */
-    // BSONObj findBatch(OperationContext* txn, batchIdType batchId);
+    BSONObj findBatch(OperationContext* txn, batchIdType batchId);
 
     /* Updates LRU list */
     BSONObj retrieveBatch(const Date_t& time);
