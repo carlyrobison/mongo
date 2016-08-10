@@ -38,6 +38,7 @@
 #include "mongo/bson/bsonobjbuilder.h"
 #include "mongo/db/db_raii.h"
 #include "mongo/db/ftdc/config.h"
+#include "mongo/db/ftdc/decompressor.h"
 #include "mongo/db/ops/update.h"
 #include "mongo/db/ops/update_request.h"
 #include "mongo/db/ops/update_result.h"
@@ -53,8 +54,30 @@ namespace mongo {
 Batch::Batch(const BSONObj& batchDocument, bool compressed)
     : _compressed(compressed), _ftdcConfig() {
     BSONObj batchDoc = batchDocument.getOwned();
+    // Create the batch Id from the batch document
+    _batchId = batchDoc["_id"].numberLong();
+
     if (compressed) {
         _compressor = stdx::make_unique<FTDCCompressor>(&_ftdcConfig);
+        // 1. Decompress the batch.
+        BSONElement compressedData = batchDoc.getField("_docs");
+        log() << "compressed data: " << compressedData;
+        int len;
+        const char* bData = compressedData.binData(len);
+        log() << "bin data: " << bData;
+
+        ConstDataRange buf(bData, len);
+        auto swBuf = FTDCDecompressor().uncompress(buf);
+        uassert(40201, swBuf.getStatus().reason(), swBuf.isOK());
+        auto _docsToReturn = swBuf.getValue();
+
+        FTDCConfig config;
+        _compressor = new FTDCCompressor(&config);
+
+        // Put 'em all back in
+        for (auto&& doc : _docsToReturn) {
+            _compressor->addSample(doc, doc.getField("_id").Date());
+        }
     }
     // Create a map entry for each doc in the docs subarray.
     for (const BSONElement& elem : batchDoc["_docs"].Array()) {
@@ -63,10 +86,8 @@ Batch::Batch(const BSONObj& batchDocument, bool compressed)
         // TODO: check that docId is really a date.
         Date_t date = docId.Date();
         _docs.emplace(date, obj.getOwned());
+        _batchId = batchDoc["_id"].numberLong();
     }
-
-    // Create the batch Id from the batch document
-    _batchId = batchDoc["_id"].numberLong();
 }
 
 Batch::Batch(batchIdType batchId, bool compressed)

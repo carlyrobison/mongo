@@ -164,9 +164,8 @@ private:
      * Decrements the space? */
     void remove(const Date_t& time);
 
-    /* Removes a specific batch from the collection. Deletes it from the cache,
-     * and the cache list, decrements cache size. */
-    void removeBatch(const Date_t& time);
+    /* Loads a batch into the cache and the cache list */
+    BSONObj findBatch(OperationContext* txn, batchIdType batchId);
 
     /**
      * Saves all of the batches at once to the backing collection. Saving consists of:
