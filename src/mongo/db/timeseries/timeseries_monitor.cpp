@@ -55,24 +55,29 @@ void TimeSeriesCacheMonitor::run() {
 
     while (!inShutdown()) {
         sleepsecs(timeseriesCacheMonitorSleepSecs);
-        const ServiceContext::UniqueOperationContext txnPtr = cc().makeOperationContext();
-        OperationContext& txn = *txnPtr;
-        std::unordered_set<std::string> removed;
-        for (const std::string& ns : _timeseriesNssCache) {
-            log() << "Looking at " << ns;
-            NamespaceString nss(ns);
-            AutoGetCollectionOrTimeseries autoColl(&txn, nss, LockMode::MODE_IX);
-            if (!autoColl.isTimeseries()) {
-                removed.insert(ns);
-                continue;
+        {
+            stdx::lock_guard<stdx::mutex> guard(_lock);
+            const ServiceContext::UniqueOperationContext txnPtr = cc().makeOperationContext();
+            OperationContext& txn = *txnPtr;
+            std::unordered_set<std::string> removed;
+            for (const std::string& ns : _timeseriesNssCache) {
+                NamespaceString nss(ns);
+                AutoGetCollectionOrTimeseries autoColl(&txn, nss, LockMode::MODE_IX);
+                if (!autoColl.getCollection() || !autoColl.isTimeseries()) {
+                    removed.insert(ns);
+                    continue;
+                }
+                autoColl.getTimeseriesCache()->flushIfNecessary(&txn);
             }
-            autoColl.getTimeseriesCache()->flushIfNecessary(&txn);
+            for (const std::string& ns : removed) {
+                _timeseriesNssCache.erase(ns);
+            }
         }
-        _timeseriesNssCache.erase(removed.begin(), removed.end());
     }
 }
 
 void TimeSeriesCacheMonitor::registerView(const NamespaceString& viewNss) {
+    stdx::lock_guard<stdx::mutex> guard(_lock);
     _timeseriesNssCache.insert(viewNss.toString());
 }
 

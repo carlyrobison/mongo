@@ -121,8 +121,8 @@ struct CollectionOptions {
     // The aggregation pipeline that defines this view.
     BSONObj pipeline;
 
-    // True if this collection is a timeseries one.
+    // These options specify what type of timeseries collection to make.
     bool timeseries = false;
-    bool compression = false;
+    bool compressed = false;
 };
 }

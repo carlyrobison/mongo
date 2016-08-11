@@ -535,7 +535,7 @@ Status Database::createView(OperationContext* txn,
                       str::stream() << "invalid namespace name for a view: " + nss.toString());
 
     return _views.createView(
-        txn, nss, viewOnNss, BSONArray(options.pipeline), options.timeseries, options.compression);
+        txn, nss, viewOnNss, BSONArray(options.pipeline), options.timeseries, options.compressed);
 }
 
 
@@ -712,19 +712,23 @@ Status userCreateNS(OperationContext* txn,
 
         // Create the backing collection
         auto backingNSS = NamespaceString(nss.db(), nss.coll().toString() + "_" + "timeseries");
-        uassert(40277, str::stream() << "Backing collection " << backingNSS.toString() << " exists", !db->getCollection(backingNSS));
+        uassert(40277,
+                str::stream() << "Backing collection " << backingNSS.toString() << " exists",
+                !db->getCollection(backingNSS));
         db->createCollection(txn, backingNSS.ns(), collectionOptions, createDefaultIndexes);
 
-        // Construct the pipeline.
-        // Trying to get: {[{$unwind: "$_docs"}, {$replaceRoot: "$_docs"}]}
+        // Construct the pipeline to "undo" the batching done by timeseries.
         BSONArrayBuilder arrBuilder;
-        if (collectionOptions.compression) {
-            arrBuilder.append(BSON("$decompress" << "$_docs"));
+        if (collectionOptions.compressed) {
+            arrBuilder.append(BSON("$decompress"
+                                   << "$_docs"));
         } else {
-            arrBuilder.append(BSON("$unwind" << "$_docs"));
-            arrBuilder.append(BSON("$replaceRoot" << BSON("newRoot" << "$_docs")));
+            arrBuilder.append(BSON("$unwind"
+                                   << "$_docs"));
+            arrBuilder.append(BSON("$replaceRoot" << BSON("newRoot"
+                                                          << "$_docs")));
         }
-        
+
         BSONObj pipeline = arrBuilder.obj();
 
         // Create the timeseries view

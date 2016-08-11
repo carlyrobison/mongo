@@ -3837,16 +3837,16 @@ protected:
     DocumentSource* decompress() {
         return _decomp.get();
     }
-        // StringData countName = countSpec.firstElement().valueStringData();
-        // Value expectedGroupExplain =
-        //     Value{Document{{"_id", Document{{"$const", BSONNULL}}},
-        //                    {countName, Document{{"$sum", Document{{"$const", 1}}}}}}};
-        // auto groupExplain = explainedStages[0];
-        // ASSERT_VALUE_EQ(groupExplain["$group"], expectedGroupExplain);
+    // StringData countName = countSpec.firstElement().valueStringData();
+    // Value expectedGroupExplain =
+    //     Value{Document{{"_id", Document{{"$const", BSONNULL}}},
+    //                    {countName, Document{{"$sum", Document{{"$const", 1}}}}}}};
+    // auto groupExplain = explainedStages[0];
+    // ASSERT_VALUE_EQ(groupExplain["$group"], expectedGroupExplain);
 
-        // Value expectedProjectExplain = Value{Document{{"_id", false}, {countName, true}}};
-        // auto projectExplain = explainedStages[1];
-        // ASSERT_VALUE_EQ(projectExplain["$project"], expectedProjectExplain);
+    // Value expectedProjectExplain = Value{Document{{"_id", false}, {countName, true}}};
+    // auto projectExplain = explainedStages[1];
+    // ASSERT_VALUE_EQ(projectExplain["$project"], expectedProjectExplain);
 
     DocumentSourceMock* source() {
         return _mock.get();
@@ -3867,13 +3867,17 @@ private:
 };
 
 TEST_F(DecompressTester, MakesDecompressStageWithFieldPath) {
-    createDecompress(BSON("$decompress" << "$_docs"));
+    createDecompress(BSON("$decompress"
+                          << "$_docs"));
 }
 
 
 TEST_F(DecompressTester, ActuallyDecompresses) {
-    createDecompress(BSON("$decompress" << "$a"));
-    Document input(fromjson("{_id: 1, a: BinData(0,'LQAAAHicU2RgYOCMz0xhqGJjAAOmssQcBhC7IsUoM5OBgRHIZAFiRiAAAIjdBQs=')}"));
+    createDecompress(BSON("$decompress"
+                          << "$a"));
+    Document input(
+        fromjson("{_id: 1, a: "
+                 "BinData(0,'LQAAAHicU2RgYOCMz0xhqGJjAAOmssQcBhC7IsUoM5OBgRHIZAFiRiAAAIjdBQs=')}"));
     source()->queue.push_back(input);
 
     boost::optional<Document> next = decompress()->getNext();
@@ -3882,7 +3886,6 @@ TEST_F(DecompressTester, ActuallyDecompresses) {
         next = decompress()->getNext();
     }
     assertExhausted();
-
 }
 
 namespace DocumentSourceBucket {

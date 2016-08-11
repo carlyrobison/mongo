@@ -33,6 +33,7 @@
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/server_parameters.h"
 #include "mongo/db/service_context.h"
+#include "mongo/stdx/mutex.h"
 #include "mongo/util/background.h"
 
 namespace mongo {
@@ -57,6 +58,7 @@ public:
 
 private:
     std::unordered_set<std::string> _timeseriesNssCache;
+    stdx::mutex _lock;
 };
 
 static TimeSeriesCacheMonitor timeseriesCacheMonitor;

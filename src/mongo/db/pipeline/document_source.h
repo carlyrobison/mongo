@@ -2080,7 +2080,7 @@ public:
 
 private:
     DocumentSourceDecompress(const boost::intrusive_ptr<ExpressionContext>& expCtx,
-                         const FieldPath& fieldPath);
+                             const FieldPath& fieldPath);
 
     // Configuration state.
     const FieldPath _decompressPath;

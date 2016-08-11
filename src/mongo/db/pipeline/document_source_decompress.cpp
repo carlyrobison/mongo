@@ -30,12 +30,12 @@
 
 #include "mongo/platform/basic.h"
 
+#include "mongo/db/ftdc/decompressor.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/pipeline/document.h"
 #include "mongo/db/pipeline/document_source.h"
 #include "mongo/db/pipeline/expression.h"
 #include "mongo/db/pipeline/value.h"
-#include "mongo/db/ftdc/decompressor.h"
 
 namespace mongo {
 
@@ -74,7 +74,7 @@ void DocumentSourceDecompress::Decompressor::resetDocument(const Document& docum
 
     ConstDataRange buf = compressedData.getBinData();
     auto swBuf = FTDCDecompressor().uncompress(buf);
-    uassert(40197, swBuf.getStatus().reason(), swBuf.isOK());
+    uassert(40278, swBuf.getStatus().reason(), swBuf.isOK());
     _docsToReturn = swBuf.getValue();
 }
 
@@ -92,8 +92,8 @@ boost::optional<Document> DocumentSourceDecompress::Decompressor::getNext() {
 DocumentSourceDecompress::DocumentSourceDecompress(const intrusive_ptr<ExpressionContext>& expCtx,
                                                    const FieldPath& fieldPath)
     : DocumentSource(expCtx),
-      _decompressPath(fieldPath), 
-      _decompressor(new Decompressor(fieldPath)){}
+      _decompressPath(fieldPath),
+      _decompressor(new Decompressor(fieldPath)) {}
 
 REGISTER_DOCUMENT_SOURCE(decompress, DocumentSourceDecompress::createFromBson);
 
@@ -121,7 +121,8 @@ boost::optional<Document> DocumentSourceDecompress::getNext() {
 
 // redo this
 Value DocumentSourceDecompress::serialize(bool explain) const {
-    return Value(Document{{getSourceName(), Document{{"path", _decompressPath.fullPathWithPrefix()}}}});
+    return Value(
+        Document{{getSourceName(), Document{{"path", _decompressPath.fullPathWithPrefix()}}}});
 }
 
 DocumentSource::GetDepsReturn DocumentSourceDecompress::getDependencies(DepsTracker* deps) const {
@@ -132,15 +133,15 @@ DocumentSource::GetDepsReturn DocumentSourceDecompress::getDependencies(DepsTrac
 intrusive_ptr<DocumentSource> DocumentSourceDecompress::createFromBson(
     BSONElement elem, const intrusive_ptr<ExpressionContext>& pExpCtx) {
     // $decompress accepts "{$decompress: '$path'}" syntax.
-    uassert(40198,
+    uassert(40282,
             str::stream()
                 << "expected a string or an object as specification for $decompress stage, got "
                 << typeName(elem.type()),
             elem.type() == String);
     std::string prefixedPathString = elem.str();
-    uassert(40199, "no path specified to $decompress stage", !prefixedPathString.empty());
+    uassert(40281, "no path specified to $decompress stage", !prefixedPathString.empty());
 
-    uassert(40200,
+    uassert(40280,
             str::stream() << "path option to $decompress stage should be prefixed with a '$': "
                           << prefixedPathString,
             prefixedPathString[0] == '$');

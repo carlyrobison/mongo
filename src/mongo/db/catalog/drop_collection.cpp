@@ -105,6 +105,13 @@ Status dropCollection(OperationContext* txn,
             if (!status.isOK()) {
                 return status;
             }
+            if (view->isTimeseries()) {
+                // Drop the backing collection as well.
+                Status backingCollStatus = db->dropCollection(txn, view->viewOn().ns());
+                if (!backingCollStatus.isOK()) {
+                    return backingCollStatus;
+                }
+            }
         }
         wunit.commit();
     }

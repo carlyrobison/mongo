@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include "mongo/bson/bsonelement.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/db/ftdc/compressor.h"
 #include "mongo/db/namespace_string.h"
@@ -42,166 +43,145 @@
 
 namespace mongo {
 
-using mongo::ErrorCodes;
-
-typedef long long batchIdType;
 class OperationContext;
-
-static const batchIdType NUM_MILLIS_IN_BATCH = 1000;
-
-// Error code for a batch that doesn't exist.
-static const int BATCH_NONEXISTENT = 40154;
-
-
+using BatchIdType = long long;
 /**
- * Represents a single time series batch.
- *
- * It will support CRUD operations for documents falling in this time series interval.
- * The document it represents is as follows:
- * {
- *     _id: <id containing timestamp>,
- *     docs: [{}, {}, ...]
- * }
- */
-class Batch {
-public:
-    /**
-     * Sets the current batch id and initializes the map.
-     */
-    Batch(batchIdType batchId, bool compressed);
-
-    /**
-     * Constructs a batch object from the bson document.
-     */
-    Batch(const BSONObj& batchDocument, bool compressed);
-
-    Batch(){};
-
-    std::string toString(bool incldeTime = false) const;
-
-    /**
-     * Inserts a document into the time series DB.
-     * Assume that the document's ID is a time.
-     */
-    void insert(const BSONObj& doc);
-
-    /**
-     * Updates a document in the time series DB.
-     * Updates the whole document; doesn't check to update just the fields that don't exist already.
-     * Asserts that the document already exists.
-     */
-    void update(const BSONObj& doc);
-
-    /* Retrieves the single BSONObj for the batch document. */
-    BSONObj retrieveBatch();
-
-    /* Retrieves a batch document for a given timestamp */
-    BSONObj retrieve(const Date_t& time);
-
-    /* Deletes a document from this batch. */
-    void remove(const Date_t& time);
-
-    /* Reports this batch's batch Id */
-    batchIdType _thisBatchId();
-
-    /* Saves a specific batch to a collection */
-    bool save(OperationContext* txn, const NamespaceString& nss);
-
-    /* Assuming this is the deconstructor. Saves the contents of the buffer
-     * (on disk?) and disappears */
-    // ~Batch();
-
-    // Returns true if this batch should be flushed and sets _needsFlush to true.
-    bool checkIfNeedsFlushAndReset();
-
-private:
-    batchIdType _batchId;
-    bool _needsFlush = false;
-
-    /* batch should own the docs so use emplace */
-    std::map<Date_t, BSONObj> _docs;
-    bool _compressed = false;
-    FTDCConfig _ftdcConfig;
-    std::unique_ptr<FTDCCompressor> _compressor;
-    std::string unused;
-};
-
-/**
- * Manages multiple time series batches in memory. This is thread safe.
+ * Manages multiple time series batches in memory. This class is thread safe.
  */
 class TimeSeriesCache {
 public:
     TimeSeriesCache(const NamespaceString& nss, bool compressed = false);
 
-    std::string toString(bool printBatches = false) const;
-
-    /* Inserts a document into the corresponding batch.
-     * Creates the batch if necessary. */
+    /**
+     * Inserts a document into the corresponding batch.
+     */
     void insert(OperationContext* txn, const BSONObj& doc);
 
-    void flushIfNecessary(OperationContext* txn);
-
-    // When trying to get rid of TS Cache, save everything to the collection. TODO.
-    // ~TimeSeriesCache();
-
-private:
-
-    /* Loads a batch into the cache and the cache list */
-    BSONObj findBatch(OperationContext* txn, batchIdType batchId);
-
-    /* Updates a document in the corresponding batch.
-     * Checks for space? Updates LRU list */
-    void update(const BSONObj& doc);
-
-    /* Gets the document corresponding to that date and time.
-     * Updates LRU list */
-    BSONObj retrieve(const Date_t& time);
-
-    /* Updates LRU list */
-    BSONObj retrieveBatch(const Date_t& time);
-
-    /* Removes the document at that time.
-     * Decrements the space? */
-    void remove(const Date_t& time);
-
-    /* Loads a batch into the cache and the cache list */
-    BSONObj findBatch(OperationContext* txn, batchIdType batchId);
+    /**
+     * Updates a document in the corresponding batch. TODO: integrate and test.
+     */
+    void update(OperationContext* txn, const BSONObj& doc);
 
     /**
-     * Saves all of the batches at once to the backing collection. Saving consists of:
-     * Saving to the collection
-     * Waiting until durable????
+     * Removes the document at that time. TODO: integrate and test.
      */
-    bool saveToCollection();
+    void remove(OperationContext* txn, const Date_t& time);
 
-    /* Cache methods that should not be able to be called by external classes */
+    /**
+     * Should be called periodically by the TimeSeriesCacheMonitor thread to notify if inactive
+     * batches should be flushed.
+     */
+    void flushIfNecessary(OperationContext* txn);
+
+    /**
+     * Should be called when mongod is shutting down.
+     */
+    void flushAll(OperationContext* txn);
+
+private:
+    /**
+     * Represents a single time series batch.
+     *
+     * It will support CRUD operations for documents falling in this time series interval.
+     * The document it represents is as follows:
+     * {
+     *     _id: <id containing timestamp>,
+     *     docs: [{}, {}, ...]
+     * }
+     */
+    class Batch {
+    public:
+        /**
+         * Sets the current batch id and initializes the map.
+         */
+        Batch(BatchIdType batchId, bool compressed);
+
+        /**
+         * Constructs a batch object from the bson document.
+         */
+        Batch(const BSONObj& batchDocument, bool compressed);
+
+        /**
+         * Inserts a document into the time series DB.
+         * Assume that the document's ID is a time.
+         */
+        void insert(const BSONObj& doc);
+
+        /**
+         * Updates a document in the time series DB.
+         * Updates the whole document; doesn't check to update just the fields that don't exist.
+         * Asserts that the document already exists.
+         */
+        void update(const BSONObj& doc);
+
+        /**
+         * Retrieves the BSONObj for the entire batch document.
+         */
+        BSONObj asBSONObj();
+
+        /**
+         * Retrieves a batch document for a given timestamp.
+         */
+        BSONObj retrieve(const Date_t& time);
+
+        /**
+         * Deletes a document from this batch.
+         */
+        void remove(const Date_t& time);
+
+        /**
+         * Saves a specific batch to a collection.
+         */
+        bool save(OperationContext* txn, const NamespaceString& nss);
+
+        /**
+         * Returns true if this batch should be flushed and sets _needsFlush to true.
+         */
+        bool checkIfNeedsFlushAndReset();
+
+    private:
+        BatchIdType _batchId;
+        std::map<Date_t, BSONObj> _docs;
+        bool _compressed = false;
+        FTDCConfig _ftdcConfig;
+        std::unique_ptr<FTDCCompressor> _compressor;
+        bool _needsFlush = false;
+    };
+
+    /**
+     * Loads a batch into the cache and the cache list.
+     */
+    BSONObj _findBatch(OperationContext* txn, BatchIdType batchId);
+
+    /**
+     * Updates LRU list.
+     */
+    BSONObj _retrieveBatch(const Date_t& date);
 
     /**
      * Ensures there is an available entry in the batch map, and evicts a batch if necessary
      */
-    void ensureFree(OperationContext* txn);
+    Batch& _getOrCreateBatch(OperationContext* txn, BatchIdType batchId);
 
-    /* Adds a batch to the LRU list. Checks if the cache needs to evict after
-     * this operation, and does so if needed. */
-    void addToLRUList(batchIdType batchId);
+    /**
+     * Adds a batch to the LRU list. Checks if the cache needs to evict after this operation, and
+     * does so if needed.
+     */
+    void _addToLRUList(BatchIdType batchId);
 
-    /* Removes a batch from the LRU list. */
-    void removeFromLRUList(batchIdType batchId);
+    /**
+     * Removes a batch from the LRU list.
+     */
+    void _removeFromLRUList(BatchIdType batchId);
 
-    /* Converts a date to the corresponding batch id number */
-    batchIdType _getBatchId(const Date_t& time);
+    /**
+     * Converts a date to the corresponding batch id number.
+     */
+    BatchIdType _getBatchId(const Date_t& date);
 
-    /* Map of batch IDs to TSbatches */
-    /* cache should own the batch so use emplace */
-    std::map<batchIdType, Batch> _cache;
-
-    /* Queue for LRU part of cache: least recently used is at the front, we add
-     * new elements to the back */
-    std::list<batchIdType> _lruList;
-
-    // Namespace of underlying collection
-    NamespaceString _nss;
-
+    std::map<BatchIdType, Batch> _cache;  // Map of batch IDs to TSbatches
+    std::list<BatchIdType> _lruList;
+    NamespaceString _nss;  // Namespace of underlying collection
     bool _compressed;
     stdx::mutex _lock;
 };

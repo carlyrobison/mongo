@@ -42,7 +42,10 @@ ViewDefinition::ViewDefinition(StringData dbName,
                                const BSONObj& pipeline,
                                bool timeseries,
                                bool timeseriesCompressed)
-    : _viewNss(dbName, viewName), _viewOnNss(dbName, viewOnName), _timeseries(timeseries), _timeseriesCompressed(timeseriesCompressed) {
+    : _viewNss(dbName, viewName),
+      _viewOnNss(dbName, viewOnName),
+      _timeseries(timeseries),
+      _timeseriesCompressed(timeseriesCompressed) {
     for (BSONElement e : pipeline) {
         _pipeline.push_back(e.Obj().getOwned());
     }
