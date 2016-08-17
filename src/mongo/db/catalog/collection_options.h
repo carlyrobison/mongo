@@ -122,7 +122,6 @@ struct CollectionOptions {
     BSONObj pipeline;
 
     // These options specify what type of timeseries collection to make.
-    bool timeseries = false;
-    bool compressed = false;
+    BSONObj timeseries;
 };
 }

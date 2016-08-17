@@ -40,17 +40,15 @@ ViewDefinition::ViewDefinition(StringData dbName,
                                StringData viewName,
                                StringData viewOnName,
                                const BSONObj& pipeline,
-                               bool timeseries,
-                               bool timeseriesCompressed)
+                               const BSONObj& timeseries)
     : _viewNss(dbName, viewName),
       _viewOnNss(dbName, viewOnName),
-      _timeseries(timeseries),
-      _timeseriesCompressed(timeseriesCompressed) {
+      _timeseries(timeseries.getOwned()) {
     for (BSONElement e : pipeline) {
         _pipeline.push_back(e.Obj().getOwned());
     }
-    if (timeseries) {
-        _tsCache = stdx::make_unique<TimeSeriesCache>(_viewOnNss, timeseriesCompressed);
+    if (isTimeseries()) {
+        _tsCache = stdx::make_unique<TimeSeriesCache>(_viewOnNss, _timeseries);
         TimeSeriesCacheMonitor::get(getGlobalServiceContext()).registerView(_viewNss);
     }
 }
@@ -58,11 +56,9 @@ ViewDefinition::ViewDefinition(StringData dbName,
 ViewDefinition::ViewDefinition(const ViewDefinition& other) {
     _viewNss = other._viewNss;
     _viewOnNss = other._viewOnNss;
-    _timeseries = other._timeseries;
-    _timeseriesCompressed = other._timeseriesCompressed;
 
-    if (_timeseries) {
-        _tsCache = stdx::make_unique<TimeSeriesCache>(_viewOnNss, _timeseriesCompressed);
+    if (isTimeseries()) {
+        _tsCache = stdx::make_unique<TimeSeriesCache>(other._viewOnNss, other._timeseries);
     }
 }
 

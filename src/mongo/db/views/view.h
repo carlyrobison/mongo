@@ -57,8 +57,7 @@ public:
                    StringData viewName,
                    StringData viewOnName,
                    const BSONObj& pipeline,
-                   bool timeseries,
-                   bool timeseriesCompressed = false);
+                   const BSONObj& timeseries);
 
     ViewDefinition(const ViewDefinition&);
 
@@ -86,7 +85,7 @@ public:
     }
 
     const bool isTimeseries() const {
-        return _timeseries;
+        return _timeseries.hasField("is_timeseries") && _timeseries.getField("is_timeseries").Bool();
     }
 
     void setViewOn(const NamespaceString& viewOnNss);
@@ -104,7 +103,7 @@ private:
     NamespaceString _viewNss;
     NamespaceString _viewOnNss;
     std::vector<BSONObj> _pipeline;
-    bool _timeseries, _timeseriesCompressed;
+    BSONObj _timeseries;
     std::unique_ptr<TimeSeriesCache> _tsCache;
 };
 }  // namespace mongo

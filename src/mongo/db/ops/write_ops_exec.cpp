@@ -376,7 +376,7 @@ static bool insertBatchAndHandleErrors(OperationContext* txn,
                         acquireCollection();
                     lastOpFixer->startingOp();
                     if (collection->isTimeseries()) {
-                        log() << "Inserting into time series cache";
+                        //log() << "Inserting into time series cache";
                         collection->getTimeseriesCache()->insert(txn, *it);
                     } else {
                         insertDocuments(txn, collection->getCollection(), it, it + 1);

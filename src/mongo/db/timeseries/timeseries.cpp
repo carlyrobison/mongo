@@ -51,18 +51,20 @@
 
 namespace mongo {
 
-TimeSeriesCache::Batch::Batch(const BSONObj& batchDocument, bool compressed)
-    : _compressed(compressed), _ftdcConfig() {
+TimeSeriesCache::Batch::Batch(const BSONObj& batchDocument, bool compressed, std::string timeField)
+    : _compressed(compressed), _timeField(timeField) {
     BSONObj batchDoc = batchDocument.getOwned();
     // Create the batch Id from the batch document
     _batchId = batchDoc["_id"].numberLong();
 
+    log() << "creating batch from existing";
+
     if (compressed) {
-        _compressor = stdx::make_unique<FTDCCompressor>(&_ftdcConfig);
+        FTDCConfig ftdcConfig;
+        _compressor = stdx::make_unique<FTDCCompressor>(&ftdcConfig);
         // Decompress the batch.
-        BSONElement compressedData = batchDoc.getField("_docs");
         int len;
-        const char* bData = compressedData.binData(len);
+        const char* bData = batchDoc.getField("_docs").binData(len);
 
         ConstDataRange buf(bData, len);
         auto swBuf = FTDCDecompressor().uncompress(buf);
@@ -71,25 +73,23 @@ TimeSeriesCache::Batch::Batch(const BSONObj& batchDocument, bool compressed)
 
         // Put 'em all back in
         for (auto&& doc : _docsToReturn) {
-            _compressor->addSample(doc, doc.getField("_id").Date());
+            _compressor->addSample(doc, doc.getField(_timeField).Date());
         }
     } else {
         // Create a map entry for each doc in the docs subarray.
         for (const BSONElement& elem : batchDoc["_docs"].Array()) {
             BSONObj obj = elem.Obj();
-            BSONElement docId = obj.getField("_id");
-            // TODO: check that docId is really a date.
-            Date_t date = docId.Date();
+            Date_t date = obj.getField(_timeField).Date();
             _docs.emplace(date, obj.getOwned());
-            _batchId = batchDoc["_id"].numberLong();
         }
     }
 }
 
-TimeSeriesCache::Batch::Batch(BatchIdType batchId, bool compressed)
-    : _batchId(batchId), _compressed(compressed), _ftdcConfig() {
+TimeSeriesCache::Batch::Batch(BatchIdType batchId, bool compressed, std::string timeField)
+    : _batchId(batchId), _compressed(compressed), _timeField(timeField)  {
     if (compressed) {
-        _compressor = stdx::make_unique<FTDCCompressor>(&_ftdcConfig);
+        FTDCConfig ftdcConfig;
+        _compressor = stdx::make_unique<FTDCCompressor>(&ftdcConfig);
     }
 }
 
@@ -103,7 +103,7 @@ std::string TimeSeriesCache::Batch::toString() const {
 void TimeSeriesCache::Batch::insert(const BSONObj& doc) {
     BSONObj newDoc = doc.getOwned();  // internally copies if necessary
     // Adds this document to the map of documents, based on date.
-    Date_t date = newDoc.getField("_id").Date();
+    Date_t date = newDoc.getField(_timeField).Date();
 
     if (_compressed) {
         // Compress this document
@@ -126,37 +126,35 @@ void TimeSeriesCache::Batch::insert(const BSONObj& doc) {
 
 void TimeSeriesCache::Batch::update(const BSONObj& doc) {
     BSONObj newDoc = doc.getOwned();  // Internally copies if necessary.
-    Date_t date = newDoc.getField("_id").Date();
+    Date_t date = newDoc.getField(_timeField).Date();
     massert(ErrorCodes::NoSuchKey, "Cannot update a document that doesn't exist.",
         _docs.find(date) != _docs.end());
     _docs[date] = newDoc;
 }
 
 BSONObj TimeSeriesCache::Batch::asBSONObj() {
+    BSONObjBuilder builder;
+    builder.append("_id", _batchId);
     if (_compressed) {
-        BSONObjBuilder builder;
-        builder.append("_id", _batchId);
         StatusWith<std::tuple<ConstDataRange, Date_t>> swBuf = _compressor->getCompressedSamples();
         massert(40275, "Could not retrieve compressed timeseries batch", swBuf.isOK());
         ConstDataRange dataRange = std::get<0>(swBuf.getValue());
         builder.appendBinData(
             "_docs", dataRange.length(), BinDataType::BinDataGeneral, dataRange.data());
         _compressor.reset();
-        return builder.obj();
+    } else {
+        // create the BSON array
+        BSONArrayBuilder arrayBuilder;
+
+        // Add values (documents) to the bson array
+        for (auto i = _docs.cbegin(); i != _docs.cend(); ++i) {
+            arrayBuilder.append(i->second);
+        }
+
+        // add the docs
+        builder.append("_docs", arrayBuilder.arr());
     }
 
-    // create the BSON array
-    BSONArrayBuilder arrayBuilder;
-
-    // Add values (documents) to the bson array
-    for (auto i = _docs.cbegin(); i != _docs.cend(); ++i) {
-        arrayBuilder.append(i->second);
-    }
-
-    // build BSON object iteself
-    BSONObjBuilder builder;
-    builder.append("_id", _batchId);
-    builder.append("_docs", arrayBuilder.arr());
     return builder.obj();
 }
 
@@ -195,19 +193,34 @@ bool TimeSeriesCache::Batch::checkIfNeedsFlushAndReset() {
     return oldValue;
 }
 
-TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss, bool compressed)
-    : _nss(nss), _compressed(compressed) {}
+TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss, const BSONObj&
+ options)
+    : _nss(nss) {
+        // Set up options
+        if (options.hasField("compressed") && options.getField("compressed").Bool()) {
+            _compressed = true;
+        }
+        if (options.hasField("cache_size")) {
+            _cacheSize = options.getField("cache_size").Number();
+        }
+        if (options.hasField("millis_in_batch")) {
+            _millisInBatch = options.getField("millis_in_batch").Number();
+        }
+        if (options.hasField("time_field")) {
+            _timeField = options.getField("time_field").String();
+        }
+    }
 
 void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc) {
     stdx::lock_guard<stdx::mutex> guard(_lock);
-    Date_t date = doc.getField("_id").Date();
+    Date_t date = doc.getField(_timeField).Date();
     BatchIdType batchId = _getBatchId(date);
     Batch& batch = _getOrCreateBatch(txn, batchId);
     batch.insert(doc);
 }
 
 void TimeSeriesCache::update(OperationContext* txn, const BSONObj& doc) {
-    Date_t date = doc.getField("_id").Date();
+    Date_t date = doc.getField(_timeField).Date();
     BatchIdType batchId = _getBatchId(date);
     Batch& batch = _getOrCreateBatch(txn, batchId);
     batch.update(doc);
@@ -233,6 +246,7 @@ void TimeSeriesCache::flushIfNecessary(OperationContext* txn) {
 
     for (BatchIdType& batchId : toRemove) {
         _cache.at(batchId).save(txn, _nss);
+        // Keep flushed things in the cache for the future.
         auto lruIter = std::find(_lruList.begin(), _lruList.end(), batchId);
         _lruList.erase(lruIter);
         _cache.erase(batchId);
@@ -266,7 +280,7 @@ TimeSeriesCache::Batch& TimeSeriesCache::_getOrCreateBatch(OperationContext* txn
     }
 
     // The batch is not in our cache, so ensure there is room to add it.
-    if (_lruList.size() >= 2) {
+    if (_lruList.size() >= _cacheSize) {
         // Choose the least recently used batch to evict.
         BatchIdType toEvict = _lruList.front();
         _cache.at(toEvict).save(txn, _nss);
@@ -276,14 +290,14 @@ TimeSeriesCache::Batch& TimeSeriesCache::_getOrCreateBatch(OperationContext* txn
 
     // Attempt to retrieve it from the collection.
     BSONObj batchObj = _findBatch(txn, batchId);
-    if (!batchObj.isEmpty()) {
+    if (batchObj.isEmpty()) {
         _cache.emplace(std::piecewise_construct,
                        std::forward_as_tuple(batchId),
-                       std::forward_as_tuple(batchId, _compressed));
+                       std::forward_as_tuple(batchId, _compressed, _timeField));
     } else {
         _cache.emplace(std::piecewise_construct,
                        std::forward_as_tuple(batchId),
-                       std::forward_as_tuple(batchObj, _compressed));
+                       std::forward_as_tuple(batchObj, _compressed, _timeField));
     }
     _addToLRUList(batchId);
     return _cache.at(batchId);
@@ -302,8 +316,7 @@ void TimeSeriesCache::_removeFromLRUList(BatchIdType batchId) {
 }
 
 BatchIdType TimeSeriesCache::_getBatchId(const Date_t& time) {
-    static const long long kMillisInBatch = 1000;
-    return time.toMillisSinceEpoch() / kMillisInBatch;
+    return time.toMillisSinceEpoch() / _millisInBatch;
 }
 
 }  // namespace mongo

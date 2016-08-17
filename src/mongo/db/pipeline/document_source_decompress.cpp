@@ -70,7 +70,6 @@ DocumentSourceDecompress::Decompressor::Decompressor(const FieldPath& decompress
 void DocumentSourceDecompress::Decompressor::resetDocument(const Document& document) {
     // Decompress the next batch.
     Value compressedData = document.getNestedField(_decompressPath);
-    log() << "compressed data: " << compressedData;
 
     ConstDataRange buf = compressedData.getBinData();
     auto swBuf = FTDCDecompressor().uncompress(buf);
@@ -85,7 +84,6 @@ boost::optional<Document> DocumentSourceDecompress::Decompressor::getNext() {
 
     Document doc = Document(_docsToReturn.back());
     _docsToReturn.pop_back();
-    log() << "document: " << doc;
     return doc;
 }
 

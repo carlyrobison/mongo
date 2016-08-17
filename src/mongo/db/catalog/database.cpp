@@ -535,7 +535,7 @@ Status Database::createView(OperationContext* txn,
                       str::stream() << "invalid namespace name for a view: " + nss.toString());
 
     return _views.createView(
-        txn, nss, viewOnNss, BSONArray(options.pipeline), options.timeseries, options.compressed);
+        txn, nss, viewOnNss, BSONArray(options.pipeline), BSONObj(options.timeseries));
 }
 
 
@@ -706,20 +706,33 @@ Status userCreateNS(OperationContext* txn,
 
     if (collectionOptions.isView()) {
         uassertStatusOK(db->createView(txn, ns, collectionOptions));
-    } else if (collectionOptions.timeseries) {
-        // If this is a timeseries view, create a backing collection with "_timeseries" appended.
+    } else if (!collectionOptions.timeseries.isEmpty()) { // will have a "is_timeseries": true
+        // if this is a timeseries view, create a backing collection and a timeseries collection with the specified parameters.
+        // Parameters passed in the timeseries BSONObj with the following defaults:
+        // timeseries: { compressed: false, cache_size: 4, millis_in_batch: 1000,
+        //               time_field: "_id", backing_name: <coll name>"_timeseries"}
         NamespaceString nss(ns);
 
-        // Create the backing collection
-        auto backingNSS = NamespaceString(nss.db(), nss.coll().toString() + "_" + "timeseries");
+        // Create the backing collection, which must not exist already.
+        NamespaceString backingNSS;
+        BSONElement userBackingNS = collectionOptions.timeseries.getField("backing_name");
+        if (!collectionOptions.timeseries.getField("backing_name").eoo()) {
+            backingNSS = NamespaceString(nss.db(), userBackingNS.String());
+        } else {
+            // use the default.
+            backingNSS = NamespaceString(nss.db(), nss.coll().toString() + "_" + "timeseries");
+        }
         uassert(40277,
-                str::stream() << "Backing collection " << backingNSS.toString() << " exists",
+                str::stream() << "Backing collection " << backingNSS.toString() << " already exists",
                 !db->getCollection(backingNSS));
+        uassert(0000, str::stream() << "Backing collection " << backingNSS.toString() << " already exists as a view",
+            db->getViewCatalog()->lookup(txn, backingNSS.toString()) == nullptr);
         db->createCollection(txn, backingNSS.ns(), collectionOptions, createDefaultIndexes);
 
         // Construct the pipeline to "undo" the batching done by timeseries.
         BSONArrayBuilder arrBuilder;
-        if (collectionOptions.compressed) {
+        BSONElement compressed = collectionOptions.timeseries.getField("compressed");
+        if (!compressed.eoo() && compressed.Bool()) {
             arrBuilder.append(BSON("$decompress"
                                    << "$_docs"));
         } else {
@@ -734,7 +747,7 @@ Status userCreateNS(OperationContext* txn,
         // Create the timeseries view
         collectionOptions.pipeline = pipeline;
         collectionOptions.viewOn = backingNSS.coll().toString();
-        db->createView(txn, ns, collectionOptions);
+        uassertStatusOK(db->createView(txn, ns, collectionOptions));
     } else {
         invariant(db->createCollection(txn, ns, collectionOptions, createDefaultIndexes));
     }
