@@ -207,7 +207,7 @@ TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss, const BSONObj&
             _millisInBatch = options.getField("millis_in_batch").Number();
         }
         if (options.hasField("time_field")) {
-            _timeField = options.getField("time_field").String();
+            _timeField = options.getField("millis_in_batch").String();
         }
     }
 

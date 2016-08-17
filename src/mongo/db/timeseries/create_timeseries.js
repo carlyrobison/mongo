@@ -11,7 +11,7 @@
     function insertDocs(db, collName) {
     	// Insert a bunch of documents.
     	const coll = db.getCollection(collName);
-        for (let i = 0; i < nDocs; i+= 100) {
+        for (let i = 0; i < nDocs; i+= 10) {
             assert.writeOK(coll.insert({"_id": new Date(i), "val": i}));
         }
     }
