@@ -50,7 +50,7 @@ using BatchIdType = long long;
  */
 class TimeSeriesCache {
 public:
-    TimeSeriesCache(const NamespaceString& nss, bool compressed = false);
+    TimeSeriesCache(const NamespaceString& nss, const BSONObj& options);
 
     /**
      * Inserts a document into the corresponding batch.
@@ -94,12 +94,12 @@ private:
         /**
          * Sets the current batch id and initializes the map.
          */
-        Batch(BatchIdType batchId, bool compressed);
+        Batch(BatchIdType batchId, bool compressed, std::string timeField);
 
         /**
          * Constructs a batch object from the bson document.
          */
-        Batch(const BSONObj& batchDocument, bool compressed);
+        Batch(const BSONObj& batchDocument, bool compressed, std::string timeField);
 
         /**
          * Prints a string. For debugging.
@@ -147,10 +147,12 @@ private:
     private:
         BatchIdType _batchId;
         std::map<Date_t, BSONObj> _docs;
-        bool _compressed = false;
-        FTDCConfig _ftdcConfig;
         std::unique_ptr<FTDCCompressor> _compressor;
         bool _needsFlush = false;
+
+        // options
+        bool _compressed;
+        std::string _timeField;
     };
 
     /**
@@ -186,9 +188,15 @@ private:
 
     std::map<BatchIdType, Batch> _cache;  // Map of batch IDs to TSbatches
     std::list<BatchIdType> _lruList;
-    NamespaceString _nss;  // Namespace of underlying collection
-    bool _compressed;
     stdx::mutex _lock;
+    NamespaceString _nss;  // Namespace of underlying collection
+
+    // options with defaults
+    bool _compressed = false;
+    unsigned int _cacheSize = 1;
+    long long _millisInBatch = 1000;
+    std::string _timeField = "_id";
+
 };
 
 }  // namespace mongo

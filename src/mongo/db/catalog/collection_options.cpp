@@ -108,8 +108,7 @@ void CollectionOptions::reset() {
     collation = BSONObj();
     viewOn = "";
     pipeline = BSONObj();
-    timeseries = false;
-    compressed = false;
+    timeseries = BSONObj();
 }
 
 bool CollectionOptions::isValid() const {
@@ -244,9 +243,42 @@ Status CollectionOptions::parse(const BSONObj& options) {
 
             pipeline = e.Obj().getOwned();
         } else if (fieldName == "timeseries") {
-            timeseries = e.trueValue();
-        } else if (fieldName == "compressed") {
-            compressed = e.trueValue();
+            if (e.type() != mongo::Object) {
+                return Status(ErrorCodes::BadValue, "'timeseries' has to be a document.");
+            }
+
+            BSONObjBuilder tsBuilder;
+            
+            tsBuilder.append("is_timeseries", true);
+
+            // Check that only valid paramenters are passed in. Do type checking.
+            for (auto&& elem: e.Obj().getOwned()) {
+                StringData name = elem.fieldName();
+
+                if (name == "compressed") {
+                    if (!elem.isBoolean()) {
+                        return Status(ErrorCodes::BadValue, "timeseries: 'compressed' must be a boolean.");
+                    }
+                } else if (name == "cache_size") {
+                    if (elem.Number() <= 0) {
+                        return Status(ErrorCodes::BadValue, "timeseries: 'cache_size' must be a natural number.");
+                    }
+                } else if (name == "millis_in_batch") {
+                    if (elem.Number() <= 0) {
+                        return Status(ErrorCodes::BadValue, "timeseries: 'millis_in_batch' must be a positive long number.");
+                    }
+                } else if ((name == "time_field") || (name == "backing_name")) {
+                    if (elem.type() != mongo::String) {
+                        return Status(ErrorCodes::BadValue, "timeseries: backing name must be a string.");
+                    }
+                } else {
+                    return Status(ErrorCodes::BadValue, "Unrecognized option to the timeseries field");
+                }
+
+                tsBuilder.append(elem);
+            }
+
+            timeseries = tsBuilder.obj();
         }
     }
 
@@ -313,12 +345,8 @@ BSONObj CollectionOptions::toBSON() const {
         b.append("pipeline", pipeline);
     }
 
-    if (timeseries) {
-        b.append("timeseries", true);
-    }
-
-    if (compressed) {
-        b.append("compressed", true);
+    if (!timeseries.isEmpty()) {
+        b.append("timeseries", timeseries);
     }
 
     return b.obj();

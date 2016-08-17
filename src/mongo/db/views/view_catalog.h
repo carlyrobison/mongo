@@ -82,8 +82,7 @@ public:
                       const NamespaceString& viewName,
                       const NamespaceString& viewOn,
                       const BSONArray& pipeline,
-                      bool timeseries,
-                      bool timeseriesCompressed = false);
+                      const BSONObj& timeseries);
 
     /**
      * Drop the view named 'viewName'.
@@ -100,7 +99,8 @@ public:
     Status modifyView(OperationContext* txn,
                       const NamespaceString& viewName,
                       const NamespaceString& viewOn,
-                      const BSONArray& pipeline);
+                      const BSONArray& pipeline,
+                      const BSONObj& timeseries = BSONObj());
 
 
     /**
@@ -143,8 +143,7 @@ private:
                                       const NamespaceString& viewName,
                                       const NamespaceString& viewOn,
                                       const BSONArray& pipeline,
-                                      bool timeseries,
-                                      bool timeseriesCompressed = false);
+                                      const BSONObj& timeseries);
     /**
      * Parses the view definition pipeline, attempts to upsert into the view graph, and refreshes
      * the graph if necessary. Returns an error status if the resulting graph would be invalid.
