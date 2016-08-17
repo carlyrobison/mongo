@@ -259,17 +259,13 @@ Status CollectionOptions::parse(const BSONObj& options) {
                     if (!elem.isBoolean()) {
                         return Status(ErrorCodes::BadValue, "timeseries: 'compressed' must be a boolean.");
                     }
-                } else if (name == "cache_size") {
+                } else if ((name == "cache_size") || (name == "millis_in_batch")) {
                     if (elem.Number() <= 0) {
-                        return Status(ErrorCodes::BadValue, "timeseries: 'cache_size' must be a natural number.");
-                    }
-                } else if (name == "millis_in_batch") {
-                    if (elem.Number() <= 0) {
-                        return Status(ErrorCodes::BadValue, "timeseries: 'millis_in_batch' must be a positive long number.");
+                        return Status(ErrorCodes::BadValue, "timeseries: option must be a natural number.");
                     }
                 } else if ((name == "time_field") || (name == "backing_name")) {
                     if (elem.type() != mongo::String) {
-                        return Status(ErrorCodes::BadValue, "timeseries: backing name must be a string.");
+                        return Status(ErrorCodes::BadValue, "timeseries: option must be a string.");
                     }
                 } else {
                     return Status(ErrorCodes::BadValue, "Unrecognized option to the timeseries field");

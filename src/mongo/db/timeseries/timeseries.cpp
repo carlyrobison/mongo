@@ -196,6 +196,7 @@ bool TimeSeriesCache::Batch::checkIfNeedsFlushAndReset() {
 TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss, const BSONObj&
  options)
     : _nss(nss) {
+        log() << "options: " << options;
         // Set up options
         if (options.hasField("compressed") && options.getField("compressed").Bool()) {
             _compressed = true;
@@ -207,7 +208,7 @@ TimeSeriesCache::TimeSeriesCache(const NamespaceString& nss, const BSONObj&
             _millisInBatch = options.getField("millis_in_batch").Number();
         }
         if (options.hasField("time_field")) {
-            _timeField = options.getField("millis_in_batch").String();
+            _timeField = options.getField("time_field").String();
         }
     }
 
@@ -247,9 +248,9 @@ void TimeSeriesCache::flushIfNecessary(OperationContext* txn) {
     for (BatchIdType& batchId : toRemove) {
         _cache.at(batchId).save(txn, _nss);
         // Keep flushed things in the cache for the future.
-        auto lruIter = std::find(_lruList.begin(), _lruList.end(), batchId);
-        _lruList.erase(lruIter);
-        _cache.erase(batchId);
+        // auto lruIter = std::find(_lruList.begin(), _lruList.end(), batchId);
+        // _lruList.erase(lruIter);
+        // _cache.erase(batchId);
     }
 }
 
