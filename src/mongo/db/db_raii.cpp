@@ -86,9 +86,7 @@ AutoGetCollectionOrTimeseries::AutoGetCollectionOrTimeseries(OperationContext* t
     }
     ViewDefinition* viewDef = _autoColl->getDb()->getViewCatalog()->lookup(txn, nss.ns());
     if (viewDef) {
-        uassert(ErrorCodes::CommandNotSupportedOnView,
-                "Command not supported on views",
-                viewDef->isTimeseries());
+        if (!viewDef->isTimeseries()) return;
         _timeseries = true;
         _timeseriesView = viewDef;
         _timeseriesCollection.emplace(

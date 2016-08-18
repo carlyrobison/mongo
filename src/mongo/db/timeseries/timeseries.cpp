@@ -140,7 +140,7 @@ BSONObj TimeSeriesCache::Batch::asBSONObj() {
         ConstDataRange dataRange = std::get<0>(swBuf.getValue());
         builder.appendBinData(
             "_docs", dataRange.length(), BinDataType::BinDataGeneral, dataRange.data());
-        _compressor.reset();
+        _compressor->reset();
     } else {
         // create the BSON array
         BSONArrayBuilder arrayBuilder;
