@@ -57,8 +57,6 @@ TimeSeriesCache::Batch::Batch(const BSONObj& batchDocument, bool compressed, std
     // Create the batch Id from the batch document
     _batchId = batchDoc["_id"].numberLong();
 
-    log() << "creating batch from existing";
-
     if (compressed) {
         FTDCConfig ftdcConfig;
         _compressor = stdx::make_unique<FTDCCompressor>(&_ftdcConfig);
@@ -107,28 +105,47 @@ void TimeSeriesCache::Batch::insert(const BSONObj& doc) {
     if (_compressed) {
         // Compress this document
         auto st = _compressor->addSample(newDoc, date);
-        massert(40276, "Insert was not OK", st.isOK());
+        massert(40276, "Timeseries: Compressed insert was not OK", st.isOK());
         if (std::get<1>(st.getValue().get()) == FTDCCompressor::CompressorState::kCompressorFull) {
-            // TODO: Force a save and eviction from the cache. Do this when evicting by size since
-            // it'll likely be similar logic.
-            log() << "Compressor is full";
+            // TODO: Force a save and eviction from the cache.
+            log() << "Timeseries: Compressor is full";
         }
-        return;
+    } else {
+        uassert(ErrorCodes::DuplicateKeyValue,
+            "Timeseries: Cannot insert a document that already exists. Try updating.",
+            _docs.find(date) == _docs.end());
+        _docs[date] = newDoc;
     }
 
-    uassert(ErrorCodes::DuplicateKeyValue,
-            "Cannot insert a document that already exists.",
-            _docs.find(date) == _docs.end());
-    _docs[date] = newDoc;
     _needsFlush = false;
 }
 
 void TimeSeriesCache::Batch::update(const BSONObj& doc) {
     BSONObj newDoc = doc.getOwned();  // Internally copies if necessary.
     Date_t date = newDoc.getField(_timeField).Date();
-    massert(ErrorCodes::NoSuchKey, "Cannot update a document that doesn't exist.",
-        _docs.find(date) != _docs.end());
-    _docs[date] = newDoc;
+
+    if (_compressed) {
+        uasserted(ErrorCodes::DuplicateKeyValue,
+            "Timeseries: Updates not allowed in compressed batches");
+    } else {
+        uassert(ErrorCodes::NoSuchKey, "Timeseries: Cannot update a document that doesn't exist. Try inserting.",
+            _docs.find(date) != _docs.end());
+        _docs[date] = newDoc;
+        _needsFlush = false;
+    }
+}
+
+void TimeSeriesCache::Batch::remove(const Date_t& time) {
+    if (_compressed) {
+        uasserted(ErrorCodes::DuplicateKeyValue,
+            "Timeseries: Deletes not allowed from compressed batches");
+    } else {
+        uassert(ErrorCodes::NoSuchKey,
+            "Cannot delete a document that doesn't exist.",
+            _docs.find(time) != _docs.end());
+        _docs.erase(time);
+        _needsFlush = false;
+    }
 }
 
 BSONObj TimeSeriesCache::Batch::asBSONObj() {
@@ -155,22 +172,6 @@ BSONObj TimeSeriesCache::Batch::asBSONObj() {
     }
 
     return builder.obj();
-}
-
-BSONObj TimeSeriesCache::Batch::retrieve(const Date_t& time) {
-    uassert(ErrorCodes::NoSuchKey,
-            "Cannot retrieve a document that doesn't exist.",
-            _docs.find(time) != _docs.end());
-
-    return _docs[time];
-}
-
-void TimeSeriesCache::Batch::remove(const Date_t& time) {
-    uassert(ErrorCodes::NoSuchKey,
-            "Cannot delete a document that doesn't exist.",
-            _docs.find(time) != _docs.end());
-
-    _docs.erase(time);
 }
 
 // Must have exclusive lock on this collection.
@@ -220,6 +221,7 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc) {
 }
 
 void TimeSeriesCache::update(OperationContext* txn, const BSONObj& doc) {
+    stdx::lock_guard<stdx::mutex> guard(_lock);
     Date_t date = doc.getField(_timeField).Date();
     BatchIdType batchId = _getBatchId(date);
     Batch& batch = _getOrCreateBatch(txn, batchId);
@@ -227,9 +229,9 @@ void TimeSeriesCache::update(OperationContext* txn, const BSONObj& doc) {
 }
 
 void TimeSeriesCache::remove(OperationContext* txn, const Date_t& date) {
+    stdx::lock_guard<stdx::mutex> guard(_lock);
     BatchIdType batchId = _getBatchId(date);
-    invariant(_cache.find(batchId) != _cache.end());
-    _cache.at(batchId).remove(date);
+    Batch& batch = _getOrCreateBatch(txn, batchId).remove(date);
     _addToLRUList(batchId);
 }
 

@@ -116,23 +116,20 @@ private:
          * Updates a document in the time series DB.
          * Updates the whole document; doesn't check to update just the fields that don't exist.
          * Asserts that the document already exists.
+         * Not allowed for compressed batches.
          */
         void update(const BSONObj& doc);
+
+        /**
+         * Deletes a document from this batch.
+         * Not allowed for compressed batches
+         */
+        void remove(const Date_t& time);
 
         /**
          * Retrieves the BSONObj for the entire batch document.
          */
         BSONObj asBSONObj();
-
-        /**
-         * Retrieves a batch document for a given timestamp.
-         */
-        BSONObj retrieve(const Date_t& time);
-
-        /**
-         * Deletes a document from this batch.
-         */
-        void remove(const Date_t& time);
 
         /**
          * Saves a specific batch to a collection.
