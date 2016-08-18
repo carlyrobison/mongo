@@ -56,6 +56,7 @@ ViewDefinition::ViewDefinition(StringData dbName,
 ViewDefinition::ViewDefinition(const ViewDefinition& other) {
     _viewNss = other._viewNss;
     _viewOnNss = other._viewOnNss;
+    _timeseries = other._timeseries.getOwned();
 
     if (isTimeseries()) {
         _tsCache = stdx::make_unique<TimeSeriesCache>(other._viewOnNss, other._timeseries);
