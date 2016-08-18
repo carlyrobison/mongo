@@ -25,7 +25,6 @@
         }
     }
 
-
     function insertDocsDateField(db, collName) {
     	// Insert a bunch of documents.
     	const coll = db.getCollection(collName);

@@ -719,7 +719,7 @@ static ExitCode _initAndListen(int listenPort) {
             } else {
                 startTTLBackgroundJob();
             }
-            //TimeSeriesCacheMonitor::get(globalServiceContext).go();
+            TimeSeriesCacheMonitor::get(globalServiceContext).go();
         }
     }
 

@@ -149,6 +149,7 @@ private:
         std::map<Date_t, BSONObj> _docs;
         std::unique_ptr<FTDCCompressor> _compressor;
         bool _needsFlush = false;
+        FTDCConfig _ftdcConfig;
 
         // options
         bool _compressed;

@@ -52,7 +52,7 @@
 namespace mongo {
 
 TimeSeriesCache::Batch::Batch(const BSONObj& batchDocument, bool compressed, std::string timeField)
-    : _compressed(compressed), _timeField(timeField) {
+    : _ftdcConfig(), _compressed(compressed), _timeField(timeField) {
     BSONObj batchDoc = batchDocument.getOwned();
     // Create the batch Id from the batch document
     _batchId = batchDoc["_id"].numberLong();
@@ -61,7 +61,7 @@ TimeSeriesCache::Batch::Batch(const BSONObj& batchDocument, bool compressed, std
 
     if (compressed) {
         FTDCConfig ftdcConfig;
-        _compressor = stdx::make_unique<FTDCCompressor>(&ftdcConfig);
+        _compressor = stdx::make_unique<FTDCCompressor>(&_ftdcConfig);
         // Decompress the batch.
         int len;
         const char* bData = batchDoc.getField("_docs").binData(len);
@@ -86,10 +86,9 @@ TimeSeriesCache::Batch::Batch(const BSONObj& batchDocument, bool compressed, std
 }
 
 TimeSeriesCache::Batch::Batch(BatchIdType batchId, bool compressed, std::string timeField)
-    : _batchId(batchId), _compressed(compressed), _timeField(timeField)  {
+    : _batchId(batchId), _ftdcConfig(), _compressed(compressed), _timeField(timeField)  {
     if (compressed) {
-        FTDCConfig ftdcConfig;
-        _compressor = stdx::make_unique<FTDCCompressor>(&ftdcConfig);
+        _compressor = stdx::make_unique<FTDCCompressor>(&_ftdcConfig);
     }
 }
 
