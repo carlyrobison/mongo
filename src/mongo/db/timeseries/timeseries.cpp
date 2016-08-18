@@ -231,7 +231,8 @@ void TimeSeriesCache::update(OperationContext* txn, const BSONObj& doc) {
 void TimeSeriesCache::remove(OperationContext* txn, const Date_t& date) {
     stdx::lock_guard<stdx::mutex> guard(_lock);
     BatchIdType batchId = _getBatchId(date);
-    Batch& batch = _getOrCreateBatch(txn, batchId).remove(date);
+    Batch& batch = _getOrCreateBatch(txn, batchId);
+    batch.remove(date);
     _addToLRUList(batchId);
 }
 
