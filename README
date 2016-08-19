@@ -1,3 +1,65 @@
+
+BEHAVIORAL DESCRIPTION
+
+1. Creating a Time-series Collection
+The user can create a Time-series collection using
+db.runCommand({create: <name>, timeseries: {<options>}})
+The options are all optional, and they are:
+
+compressed: <bool>
+- default: false
+- Whether the batches utilize FTDC compression. In compressed batches, there is no guarantee that the object ID or time field is unique.
+
+cache_size: <number>
+- default: 4
+- Number of batches allowed in the cache (size of each batch is not tracked)
+
+millis_in_batch: <number>
+- default: 1000 (batch by second)
+- How many milliseconds apply to each batch
+
+time_field: <string>
+- default: _id
+- Which field in the doc contains the Date
+
+backing_name: <string>
+- default: <name> + “_timeseries”
+- The backing collection for the time series view
+
+2. CRUD on a Time-series Collection
+Users insert into a Time-series collection as if it was a regular collection:
+	db.<name>.insert({doc})
+
+In non-compressed batches, they can also perform limited updates and deletes:
+db.<name>.update({query of the time field}, {new doc to replace with}, {upsert: <bool>})
+db.<name>.delete({query of the time field})
+
+Users find objects with a regular find command.
+db.<name>.find()
+db.<name>.find({find query to match on})
+
+Since a Time-series collection inserts into a cache, which flushes to a backing collection every second (configurable with --setParameter timeseriesCacheMonitorSleepSecs=<int>), inserts/updates/deletes may take a second to show up in finds.
+
+3. Performance
+Time-series collections are optimized for high frequency inserts near the current timestamp, and those changes are propagated every second. Since we update the backing collection after a certain time, we ensure reasonable persistence for low frequency, sparse series. Because we batch timestamps, we have a low WAF and many user-created docs per oplog entry. 
+
+IMPLEMENTATION DETAILS
+
+1. Batching
+Behind the scenes, each “document” that the user inserts is batched into a larger document, with batching done at some granularity of the time stamp. The rough document looks as follows:
+{“_id”: batched timestamp, “docs”: [{doc1}, {doc2}, …]}
+The user may also specify compressed batching, which utilizes FTDC compression but does not check for duplicate IDs.
+
+2. Views
+We implement Time-series collections as a special kind of Non-Materialized View, which views the backing collection through the lens of an aggregation pipeline. This allows us to “undo” the batching operation so the user sees the data in the format it was inserted in.
+
+We store these batched documents in an in-memory caches. Currently, we give each Time-series collection its own cache. Once the buffer has reached a certain size or when the last insert into the document is older than the flushing interval, or when the user requests it, the document is added into the collection that backs the view. The backing collection will handle persistence and replication.
+
+This collection type is also suitable for workloads similar to FTDC since compressed Time-series collections use by the same delta compression algorithm FTDC currently uses.
+
+
+————————————————————————————————————————————————————————————————————————————————
+
 MongoDB README
 
 Welcome to MongoDB!

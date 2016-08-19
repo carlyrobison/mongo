@@ -84,6 +84,11 @@ boost::optional<Document> DocumentSourceDecompress::Decompressor::getNext() {
 
     Document doc = Document(_docsToReturn.back());
     _docsToReturn.pop_back();
+
+    if (doc.empty()) {
+        // the last doc in each decompressed batch is empty.
+        return boost::none;
+    }
     return doc;
 }
 
@@ -117,7 +122,6 @@ boost::optional<Document> DocumentSourceDecompress::getNext() {
     return out;
 }
 
-// redo this
 Value DocumentSourceDecompress::serialize(bool explain) const {
     return Value(
         Document{{getSourceName(), Document{{"path", _decompressPath.fullPathWithPrefix()}}}});

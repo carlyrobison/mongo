@@ -56,6 +56,7 @@ ViewDefinition::ViewDefinition(StringData dbName,
 ViewDefinition::ViewDefinition(const ViewDefinition& other) {
     _viewNss = other._viewNss;
     _viewOnNss = other._viewOnNss;
+    _pipeline = other._pipeline;
     _timeseries = other._timeseries.getOwned();
 
     if (isTimeseries()) {
