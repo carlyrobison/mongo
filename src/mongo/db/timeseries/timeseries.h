@@ -35,6 +35,7 @@
 #include "mongo/db/service_context.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/util/time_support.h"
+#include "mongo/db/ops/write_ops_exec.h"
 
 #include <assert.h>
 #include <list>
@@ -58,14 +59,14 @@ public:
     void insert(OperationContext* txn, const BSONObj& doc);
 
     /**
-     * Updates a document in the corresponding batch. TODO: integrate and test.
+     * Updates a document in the corresponding batch.
      */
-    void update(OperationContext* txn, const BSONObj& doc);
+    WriteResult::SingleResult update(OperationContext* txn, const BSONObj& doc, bool upsert);
 
     /**
-     * Removes the document at that time. TODO: integrate and test.
+     * Removes the document at that time. Returns the number that were removed.
      */
-    void remove(OperationContext* txn, const Date_t& time);
+    int remove(OperationContext* txn, const BSONObj& doc);
 
     /**
      * Should be called periodically by the TimeSeriesCacheMonitor thread to notify if inactive
@@ -118,13 +119,14 @@ private:
          * Asserts that the document already exists.
          * Not allowed for compressed batches.
          */
-        void update(const BSONObj& doc);
+        WriteResult::SingleResult update(const BSONObj& doc, bool upsert);
 
         /**
          * Deletes a document from this batch.
-         * Not allowed for compressed batches
+         * Not allowed for compressed batches.
+         * Assumes that the time field is included in the doc (even if nothing else is).
          */
-        void remove(const Date_t& time);
+        int remove(const BSONObj& doc);
 
         /**
          * Retrieves the BSONObj for the entire batch document.

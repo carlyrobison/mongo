@@ -120,32 +120,43 @@ void TimeSeriesCache::Batch::insert(const BSONObj& doc) {
     _needsFlush = false;
 }
 
-void TimeSeriesCache::Batch::update(const BSONObj& doc) {
+WriteResult::SingleResult TimeSeriesCache::Batch::update(const BSONObj& doc, bool upsert) {
+    invariant(!_compressed);
     BSONObj newDoc = doc.getOwned();  // Internally copies if necessary.
     Date_t date = newDoc.getField(_timeField).Date();
 
-    if (_compressed) {
-        uasserted(ErrorCodes::DuplicateKeyValue,
-            "Timeseries: Updates not allowed in compressed batches");
-    } else {
-        uassert(ErrorCodes::NoSuchKey, "Timeseries: Cannot update a document that doesn't exist. Try inserting.",
-            _docs.find(date) != _docs.end());
-        _docs[date] = newDoc;
-        _needsFlush = false;
+    if (_docs.find(date) == _docs.end()) {
+        // Perform an upsert if permitted.
+        if (upsert) {
+            _docs[date] = newDoc;
+            _needsFlush = false;
+            BSONObjBuilder bob;
+            bob.append("upserted", newDoc.getField("_id"));
+            return {1, 1, bob.obj()};
+        } else {
+            uasserted(ErrorCodes::NoSuchKey, "Timeseries: Cannot update a document that doesn't exist. Try upserting.");
+        }
     }
+
+    _docs[date] = newDoc;
+    _needsFlush = false;
+    return {1, 1, BSONObj()};
 }
 
-void TimeSeriesCache::Batch::remove(const Date_t& time) {
-    if (_compressed) {
-        uasserted(ErrorCodes::DuplicateKeyValue,
-            "Timeseries: Deletes not allowed from compressed batches");
-    } else {
-        uassert(ErrorCodes::NoSuchKey,
-            "Cannot delete a document that doesn't exist.",
-            _docs.find(time) != _docs.end());
-        _docs.erase(time);
+int TimeSeriesCache::Batch::remove(const BSONObj& doc) {
+    invariant(!_compressed);
+    BSONObj newDoc = doc.getOwned();  // Internally copies if necessary.
+    Date_t date = newDoc.getField(_timeField).Date();
+
+    if (_docs.find(date) != _docs.end()) {
+        // Needs erasing
+        _docs.erase(date);
         _needsFlush = false;
+        return 1;
     }
+
+    // No erasing needed.
+    return 0;
 }
 
 BSONObj TimeSeriesCache::Batch::asBSONObj() {
@@ -153,7 +164,7 @@ BSONObj TimeSeriesCache::Batch::asBSONObj() {
     builder.append("_id", _batchId);
     if (_compressed) {
         StatusWith<std::tuple<ConstDataRange, Date_t>> swBuf = _compressor->getCompressedSamples();
-        massert(40275, "Could not retrieve compressed timeseries batch", swBuf.isOK());
+        massert(40275, "Could not retrieve compressed timeseries batch.", swBuf.isOK());
         ConstDataRange dataRange = std::get<0>(swBuf.getValue());
         builder.appendBinData(
             "_docs", dataRange.length(), BinDataType::BinDataGeneral, dataRange.data());
@@ -220,20 +231,26 @@ void TimeSeriesCache::insert(OperationContext* txn, const BSONObj& doc) {
     batch.insert(doc);
 }
 
-void TimeSeriesCache::update(OperationContext* txn, const BSONObj& doc) {
+WriteResult::SingleResult TimeSeriesCache::update(OperationContext* txn, const BSONObj& doc, bool upsert) {
+    uassert(ErrorCodes::IllegalOperation,
+            "Timeseries: Updates not allowed in compressed batches.",
+            !_compressed);
     stdx::lock_guard<stdx::mutex> guard(_lock);
     Date_t date = doc.getField(_timeField).Date();
     BatchIdType batchId = _getBatchId(date);
     Batch& batch = _getOrCreateBatch(txn, batchId);
-    batch.update(doc);
+    return batch.update(doc, upsert);
 }
 
-void TimeSeriesCache::remove(OperationContext* txn, const Date_t& date) {
+int TimeSeriesCache::remove(OperationContext* txn, const BSONObj& doc) {
+    uassert(ErrorCodes::IllegalOperation,
+            "Timeseries: Removes not allowed in compressed batches.",
+            !_compressed);
     stdx::lock_guard<stdx::mutex> guard(_lock);
+    Date_t date = doc.getField(_timeField).Date();
     BatchIdType batchId = _getBatchId(date);
     Batch& batch = _getOrCreateBatch(txn, batchId);
-    batch.remove(date);
-    _addToLRUList(batchId);
+    return batch.remove(doc);
 }
 
 void TimeSeriesCache::flushIfNecessary(OperationContext* txn) {

@@ -508,7 +508,7 @@ static WriteResult::SingleResult performSingleUpdateOp(OperationContext* txn,
     uassertStatusOK(parsedUpdate.parseRequest());
 
     ScopedTransaction scopedXact(txn, MODE_IX);
-    boost::optional<AutoGetCollection> collection;
+    boost::optional<AutoGetCollectionOrTimeseries> collection;
     while (true) {
         txn->checkForInterrupt();
         if (MONGO_FAIL_POINT(failAllUpdates)) {
@@ -517,9 +517,8 @@ static WriteResult::SingleResult performSingleUpdateOp(OperationContext* txn,
 
         collection.emplace(txn,
                            ns,
-                           MODE_IX,  // DB is always IX, even if collection is X.
-                           parsedUpdate.isIsolated() ? MODE_X : MODE_IX);
-        if (collection->getCollection() || !op.upsert)
+                           MODE_IX);
+        if (collection->getCollection() || !op.upsert || collection->isTimeseries())
             break;
 
         collection.reset();  // unlock.
@@ -531,6 +530,11 @@ static WriteResult::SingleResult performSingleUpdateOp(OperationContext* txn,
     }
 
     assertCanWrite_inlock(txn, ns);
+
+    // Here's a hatch for timeseries updates.
+    if (collection->isTimeseries()) {
+        return collection->getTimeseriesCache()->update(txn, op.update, op.upsert);
+    }
 
     auto exec = uassertStatusOK(
         getExecutorUpdate(txn, &curOp.debug(), collection->getCollection(), &parsedUpdate));
@@ -633,15 +637,19 @@ static WriteResult::SingleResult performSingleDeleteOp(OperationContext* txn,
     }
 
     ScopedTransaction scopedXact(txn, MODE_IX);
-    AutoGetCollection collection(txn,
+    AutoGetCollectionOrTimeseries collection(txn,
                                  ns,
-                                 MODE_IX,  // DB is always IX, even if collection is X.
-                                 parsedDelete.isIsolated() ? MODE_X : MODE_IX);
+                                 MODE_IX);
     if (collection.getDb()) {
         curOp.raiseDbProfileLevel(collection.getDb()->getProfilingLevel());
     }
 
     assertCanWrite_inlock(txn, ns);
+
+    // Here's a hatch for timeseries deletes.
+    if (collection.isTimeseries()) {
+        return {collection.getTimeseriesCache()->remove(txn, op.query)};
+    }
 
     auto exec = uassertStatusOK(
         getExecutorDelete(txn, &curOp.debug(), collection.getCollection(), &parsedDelete));
